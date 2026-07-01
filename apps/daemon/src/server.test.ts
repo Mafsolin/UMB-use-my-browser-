@@ -62,4 +62,43 @@ describe("daemon server", () => {
     expect(body).toContain('id="echo"');
     expect(body).toContain('id="go"');
   });
+
+  it("returns 503 for auth bootstrap when no bridge auth is configured", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/internal/auth-bootstrap`);
+    expect(response.status).toBe(503);
+  });
+});
+
+describe("daemon server with bridge auth configured", () => {
+  let server: ReturnType<typeof createServer>;
+  let port: number;
+
+  beforeEach(async () => {
+    server = createServer(undefined, {
+      bearerToken: "test-bearer-token",
+      allowedOrigins: ["chrome-extension://*"]
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    port = (server.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  it("exposes the bearer token and allowed origins for the local native host", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/internal/auth-bootstrap`);
+    const body = (await response.json()) as {
+      token: string;
+      allowedOrigins: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.token).toBe("test-bearer-token");
+    expect(body.allowedOrigins).toEqual(["chrome-extension://*"]);
+  });
 });

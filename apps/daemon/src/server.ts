@@ -2,6 +2,7 @@ import http from "node:http";
 import { bridgeCommandSchema } from "@umb/protocol";
 import { BridgeService } from "./bridge-service.js";
 import { routes } from "./routes.js";
+import type { BridgeAuthConfig } from "./extension-connector.js";
 
 const serverStartedAt = new Date().toISOString();
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
@@ -57,9 +58,28 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   });
 }
 
-export function createServer(service = new BridgeService()) {
+export function createServer(
+  service = new BridgeService(),
+  bridgeAuth?: BridgeAuthConfig
+) {
   return http.createServer(async (req, res) => {
     try {
+      if (req.method === "GET" && req.url === "/internal/auth-bootstrap") {
+        if (!bridgeAuth) {
+          res.writeHead(503, jsonHeaders);
+          res.end(JSON.stringify({ error: "UMB bridge auth not configured." }));
+          return;
+        }
+        res.writeHead(200, jsonHeaders);
+        res.end(
+          JSON.stringify({
+            token: bridgeAuth.bearerToken,
+            allowedOrigins: bridgeAuth.allowedOrigins
+          })
+        );
+        return;
+      }
+
       if (req.method === "POST" && req.url === routes.createSession) {
         const body = (await readJsonBody(req)) as {
           clientId: string;

@@ -5,6 +5,7 @@ import {
   isCommittedNavigation,
   isUsableNavigationState
 } from "./background-runtime-helpers.js";
+import { buildBridgeSubprotocols } from "./bridge-auth.js";
 import type { ExtensionRequest, ExtensionResponse } from "./messages.js";
 
 const DAEMON_URL = "ws://127.0.0.1:44777/extension";
@@ -28,9 +29,13 @@ let socketReconnectTimer: number | undefined;
 let sessionCleanupTimer: number | undefined;
 let nativePort: chrome.runtime.Port | undefined;
 let nativeReconnectTimer: number | undefined;
+let bridgeBearerToken: string | undefined;
+let bridgeAllowedOrigins: string[] | undefined;
 const extensionStartedAt = new Date().toISOString();
 
 type BootstrapStatus = {
+  bearerToken?: string;
+  allowedOrigins?: string[];
   daemonHttpUrl?: string;
   daemonPid?: number;
   daemonStartedAt?: string;
@@ -1080,7 +1085,7 @@ async function connectToDaemon(nextSocketUrl: string) {
     return;
   }
 
-  const currentSocket = new WebSocket(socketUrl);
+  const currentSocket = new WebSocket(socketUrl, buildBridgeSubprotocols(bridgeBearerToken));
   socket = currentSocket;
 
   currentSocket.addEventListener("open", () => {
@@ -1147,6 +1152,8 @@ function scheduleNativeReconnect(delay = NATIVE_RECONNECT_DELAY_MS) {
 }
 
 function applyBootstrapStatus(nativeInfo: BootstrapStatus) {
+  bridgeBearerToken = nativeInfo.bearerToken;
+  bridgeAllowedOrigins = nativeInfo.allowedOrigins;
   updateStatus({
     daemonHttpUrl: nativeInfo.daemonHttpUrl,
     daemonPid: nativeInfo.daemonPid,

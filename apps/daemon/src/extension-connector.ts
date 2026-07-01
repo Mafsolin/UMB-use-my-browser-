@@ -25,6 +25,71 @@ type BridgeResponse = {
   error?: string;
 };
 
+export type BridgeAuthConfig = {
+  bearerToken: string;
+  allowedOrigins: string[];
+};
+
+export type BridgeHandshakeResult =
+  | { ok: true; protocol: string }
+  | { ok: false; reason: string };
+
+const BEARER_PROTOCOL_PREFIX = "bearer.";
+const DEFAULT_PROTOCOL = "umb-v1";
+
+export function verifyBridgeHandshake(input: {
+  origin: string | undefined;
+  protocols: Iterable<string> | string;
+  expectedToken: string;
+  allowedOrigins: string[];
+}): BridgeHandshakeResult {
+  const protocolList =
+    typeof input.protocols === "string" ? [input.protocols] : [...input.protocols];
+
+  const bearerProtocol = protocolList.find(
+    (entry) => typeof entry === "string" && entry.startsWith(BEARER_PROTOCOL_PREFIX)
+  );
+  if (!bearerProtocol) {
+    return { ok: false, reason: "Missing bearer token in WebSocket subprotocols." };
+  }
+
+  const providedToken = bearerProtocol.slice(BEARER_PROTOCOL_PREFIX.length);
+  if (!providedToken || providedToken !== input.expectedToken) {
+    return { ok: false, reason: "Invalid bearer token in WebSocket subprotocols." };
+  }
+
+  if (!input.origin) {
+    return { ok: false, reason: "Missing Origin header on WebSocket upgrade." };
+  }
+
+  const originAllowed = input.allowedOrigins.some((pattern) =>
+    matchesOriginPattern(input.origin!, pattern)
+  );
+  if (!originAllowed) {
+    return {
+      ok: false,
+      reason: `Origin ${input.origin} is not in the UMB bridge allowlist.`
+    };
+  }
+
+  const chosenProtocol =
+    protocolList.find(
+      (entry) => typeof entry === "string" && !entry.startsWith(BEARER_PROTOCOL_PREFIX)
+    ) ?? DEFAULT_PROTOCOL;
+  return { ok: true, protocol: chosenProtocol };
+}
+
+function matchesOriginPattern(origin: string, pattern: string): boolean {
+  if (pattern === origin) {
+    return true;
+  }
+  if (pattern.endsWith("*")) {
+    const prefix = pattern.slice(0, -1);
+    return origin.startsWith(prefix);
+  }
+  return false;
+}
+
 export class ExtensionConnector implements BrowserConnector {
   readonly capabilities = {
     canReadBackgroundTab: true,
@@ -45,9 +110,15 @@ export class ExtensionConnector implements BrowserConnector {
     connectedProcessLabel?: string;
   };
   private readonly requestTimeoutMs: number;
+  private readonly auth: BridgeAuthConfig;
 
-  constructor(requestTimeoutMs = 30000) {
+  constructor(auth: BridgeAuthConfig, requestTimeoutMs = 30000) {
+    this.auth = auth;
     this.requestTimeoutMs = requestTimeoutMs;
+  }
+
+  getAuthConfig(): { allowedOrigins: string[] } {
+    return { allowedOrigins: [...this.auth.allowedOrigins] };
   }
 
   getConnectionStatus() {
@@ -112,7 +183,23 @@ export class ExtensionConnector implements BrowserConnector {
   }
 
   attachToServer(server: import("node:http").Server, path = "/extension"): WebSocketServer {
-    const wsServer = new WebSocketServer({ server, path });
+    const wsServer = new WebSocketServer({
+      server,
+      path,
+      handleProtocols: (protocols, request) => {
+        const result = verifyBridgeHandshake({
+          origin: request.headers.origin,
+          protocols,
+          expectedToken: this.auth.bearerToken,
+          allowedOrigins: this.auth.allowedOrigins
+        });
+        if (!result.ok) {
+          console.warn(`UMB bridge handshake rejected: ${result.reason}`);
+          return false;
+        }
+        return result.protocol;
+      }
+    });
     wsServer.on("connection", (socket: WebSocket) => {
       this.failAllPending(new Error("UMB extension reconnected before pending requests completed."));
       this.socket = socket;

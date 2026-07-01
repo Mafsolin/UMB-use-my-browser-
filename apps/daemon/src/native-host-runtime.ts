@@ -11,8 +11,15 @@ type NativeHostRequest = {
   type?: string;
 };
 
+type AuthBootstrap = {
+  token: string;
+  allowedOrigins: string[];
+};
+
 type NativeHostResponse = {
   ok: boolean;
+  bearerToken?: string;
+  allowedOrigins?: string[];
   daemonHttpUrl?: string;
   daemonPid?: number;
   daemonStartedAt?: string;
@@ -28,6 +35,33 @@ async function daemonHealthy(): Promise<boolean> {
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+async function fetchAuthBootstrap(): Promise<AuthBootstrap | null> {
+  try {
+    const response = await fetch(`${DAEMON_HTTP_URL}/internal/auth-bootstrap`);
+    if (!response.ok) {
+      return null;
+    }
+    const body = (await response.json()) as {
+      token?: unknown;
+      allowedOrigins?: unknown;
+    };
+    if (
+      typeof body.token !== "string" ||
+      body.token.length === 0 ||
+      !Array.isArray(body.allowedOrigins) ||
+      !body.allowedOrigins.every((entry) => typeof entry === "string")
+    ) {
+      return null;
+    }
+    return {
+      token: body.token,
+      allowedOrigins: body.allowedOrigins as string[]
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -76,16 +110,24 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
     }
   })();
 
+  const auth = await fetchAuthBootstrap();
+
+  const baseResponse = {
+    daemonHttpUrl: DAEMON_HTTP_URL,
+    daemonPid: daemonHealth?.daemon?.pid,
+    daemonStartedAt: daemonHealth?.daemon?.startedAt,
+    hostName: HOST_NAME,
+    nativeHostPid: process.pid,
+    wsUrl: DAEMON_WS_URL,
+    bearerToken: auth?.token,
+    allowedOrigins: auth?.allowedOrigins
+  };
+
   switch (request.type) {
     case "ping":
       return {
         ok: true,
-        daemonHttpUrl: DAEMON_HTTP_URL,
-        daemonPid: daemonHealth?.daemon?.pid,
-        daemonStartedAt: daemonHealth?.daemon?.startedAt,
-        hostName: HOST_NAME,
-        nativeHostPid: process.pid,
-        wsUrl: DAEMON_WS_URL
+        ...baseResponse
       };
     case "getDaemonInfo":
     case undefined:
@@ -100,12 +142,9 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
       };
       return {
         ok: true,
-        daemonHttpUrl: DAEMON_HTTP_URL,
+        ...baseResponse,
         daemonPid: refreshedHealth?.daemon?.pid,
-        daemonStartedAt: refreshedHealth?.daemon?.startedAt,
-        hostName: HOST_NAME,
-        nativeHostPid: process.pid,
-        wsUrl: DAEMON_WS_URL
+        daemonStartedAt: refreshedHealth?.daemon?.startedAt
       };
     default:
       return {
