@@ -12,6 +12,7 @@ export const BridgeCommandType = {
   Fill: "fill",
   Scroll: "scroll",
   Screenshot: "screenshot",
+  Submit: "submit",
   Finalize: "finalize",
   NameSession: "nameSession"
 } as const;
@@ -96,6 +97,9 @@ const clickParams = z
 const fillParams = z
   .object({ tabId: tabIdSchema, selector: selectorSchema, value: valueSchema })
   .strict();
+const submitParams = z
+  .object({ tabId: tabIdSchema, selector: selectorSchema })
+  .strict();
 const scrollParams = z
   .object({ tabId: tabIdSchema, x: coordinateSchema, y: coordinateSchema })
   .strict();
@@ -156,6 +160,12 @@ export const fillCommandSchema = z.object({
   params: fillParams
 }).strict();
 
+export const submitCommandSchema = z.object({
+  type: z.literal(BridgeCommandType.Submit),
+  sessionId: sessionIdField,
+  params: submitParams
+}).strict();
+
 export const scrollCommandSchema = z.object({
   type: z.literal(BridgeCommandType.Scroll),
   sessionId: sessionIdField,
@@ -192,6 +202,7 @@ export const bridgeCommandSchema = z.discriminatedUnion("type", [
   fillCommandSchema,
   scrollCommandSchema,
   screenshotCommandSchema,
+  submitCommandSchema,
   nameSessionCommandSchema,
   finalizeCommandSchema
 ]);

@@ -4,15 +4,14 @@ import {
   bridgeCommandSchema,
   bridgeSessionSchema,
   clickCommandSchema,
-  claimTabCommandSchema,
   fillCommandSchema,
   finalizeCommandSchema,
-  getTitleCommandSchema,
   gotoCommandSchema,
   nameSessionCommandSchema,
   newTabCommandSchema,
   openTabsCommandSchema,
-  scrollCommandSchema
+  scrollCommandSchema,
+  submitCommandSchema
 } from "./schema.js";
 
 const validSessionId = "123e4567-e89b-12d3-a456-426614174000";
@@ -84,6 +83,15 @@ describe("bridge command parsing - valid payloads", () => {
       params: { tabId: "t-1", selector: "button.buy" }
     });
     expect(command.params.selector).toBe("button.buy");
+  });
+
+  it("accepts a submit command with a selector", () => {
+    const command = submitCommandSchema.parse({
+      type: "submit",
+      sessionId: validSessionId,
+      params: { tabId: "t-1", selector: "form.checkout" }
+    });
+    expect(command.params.selector).toBe("form.checkout");
   });
 
   it("accepts a fill command with selector and value", () => {

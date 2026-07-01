@@ -82,6 +82,7 @@ export interface BrowserConnector {
   fill(tabId: string, selector: string, value: string): Promise<void>;
   scroll(tabId: string, x: number, y: number): Promise<ScrollResult>;
   screenshot(tabId: string): Promise<string>;
+  submit(tabId: string, selector: string): Promise<{ confirmed: boolean }>;
   finalize(request: FinalizeRequest): Promise<{
     kept: FinalizeInstruction[];
     closed: string[];

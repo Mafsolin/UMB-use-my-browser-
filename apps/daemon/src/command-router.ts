@@ -26,6 +26,8 @@ export function createCommandRouter(transport: BrowserConnector) {
           command.params.selector,
           command.params.value
         );
+      case "submit":
+        return transport.submit(command.params.tabId, command.params.selector);
       case "scroll":
         return transport.scroll(
           command.params.tabId,

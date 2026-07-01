@@ -286,6 +286,14 @@ export class ExtensionConnector implements BrowserConnector {
     });
   }
 
+  async submit(tabId: string, selector: string): Promise<{ confirmed: boolean }> {
+    return this.send("submit", {
+      sessionId: this.getCurrentSessionId(),
+      tabId,
+      selector
+    });
+  }
+
   async scroll(tabId: string, x: number, y: number): Promise<ScrollResult> {
     return await this.send("scroll", {
       sessionId: this.getCurrentSessionId(),

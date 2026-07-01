@@ -272,6 +272,35 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
+    "umb_submit",
+    {
+      description:
+        "Submit a form or submit button in a claimed or UMB-created tab.",
+      inputSchema: {
+        sessionId: z.string().optional(),
+        tabId: z.string(),
+        selector: z.string()
+      }
+    },
+    async (input) => {
+      const sessionId = await resolveSessionId(input);
+      const result = (await service.executeCommand({
+        type: "submit",
+        sessionId,
+        params: { tabId: input.tabId, selector: input.selector }
+      })) as { confirmed: boolean };
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Submitted ${input.selector} on tab ${input.tabId}`
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
     "umb_scroll",
     {
       description: "Scroll within a claimed or UMB-created tab.",

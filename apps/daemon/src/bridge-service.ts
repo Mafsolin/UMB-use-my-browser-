@@ -135,6 +135,10 @@ export class BridgeService {
         this.sessionManager.assertAllowed(command.sessionId, command.type);
       }
 
+      if (command.type === "submit") {
+        this.sessionManager.assertAllowed(command.sessionId, "submitForm");
+      }
+
       if (command.type === "claimTab") {
         const result = await this.router(command);
         this.tabRegistry.track(command.sessionId, command.params.tabId);

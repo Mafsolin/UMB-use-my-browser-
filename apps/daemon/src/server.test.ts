@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createServer } from "./server.js";
+import {
+  createServer,
+  isLoopbackAddress,
+  isValidChromiumExtensionId,
+  originForExtensionId,
+  resolveBootstrapAllowedOrigins
+} from "./server.js";
 
 describe("daemon server", () => {
   let server: ReturnType<typeof createServer>;
@@ -58,14 +64,53 @@ describe("daemon server", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(body).toContain("UMB Local Test Page");
+    expect(body).toContain('id="search-form"');
     expect(body).toContain('id="search"');
     expect(body).toContain('id="echo"');
     expect(body).toContain('id="go"');
+    expect(body).toContain('id="submit-button"');
+    expect(body).toContain('id="submit-result"');
   });
 
   it("returns 503 for auth bootstrap when no bridge auth is configured", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/internal/auth-bootstrap`);
     expect(response.status).toBe(503);
+  });
+});
+
+describe("auth bootstrap helpers", () => {
+  it("recognizes loopback addresses only", () => {
+    expect(isLoopbackAddress("127.0.0.1")).toBe(true);
+    expect(isLoopbackAddress("::1")).toBe(true);
+    expect(isLoopbackAddress("::ffff:127.0.0.1")).toBe(true);
+    expect(isLoopbackAddress("192.168.1.10")).toBe(false);
+    expect(isLoopbackAddress(undefined)).toBe(false);
+  });
+
+  it("validates Chromium extension ids", () => {
+    expect(isValidChromiumExtensionId("abcdefghijklmnopabcdefghijklmnop")).toBe(true);
+    expect(isValidChromiumExtensionId("abc")).toBe(false);
+    expect(isValidChromiumExtensionId("not-an-extension-id-1234567890")).toBe(false);
+    expect(isValidChromiumExtensionId(undefined)).toBe(false);
+  });
+
+  it("builds an exact extension origin", () => {
+    expect(originForExtensionId("ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP")).toBe(
+      "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+    );
+  });
+
+  it("does not mutate configured origins when resolving bootstrap origins", () => {
+    const configured = ["chrome-extension://*"];
+    const resolved = resolveBootstrapAllowedOrigins(
+      configured,
+      "abcdefghijklmnopabcdefghijklmnop"
+    );
+
+    expect(resolved).toEqual([
+      "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+    ]);
+    expect(configured).toEqual(["chrome-extension://*"]);
   });
 });
 
@@ -90,8 +135,10 @@ describe("daemon server with bridge auth configured", () => {
     });
   });
 
-  it("exposes the bearer token and allowed origins for the local native host", async () => {
-    const response = await fetch(`http://127.0.0.1:${port}/internal/auth-bootstrap`);
+  it("exposes an exact extension origin for the requesting extension id", async () => {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/internal/auth-bootstrap?extensionId=abcdefghijklmnopabcdefghijklmnop`
+    );
     const body = (await response.json()) as {
       token: string;
       allowedOrigins: string[];
@@ -99,6 +146,18 @@ describe("daemon server with bridge auth configured", () => {
 
     expect(response.status).toBe(200);
     expect(body.token).toBe("test-bearer-token");
-    expect(body.allowedOrigins).toEqual(["chrome-extension://*"]);
+    expect(body.allowedOrigins).toEqual([
+      "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+    ]);
+  });
+
+  it("rejects invalid extension ids for auth bootstrap", async () => {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/internal/auth-bootstrap?extensionId=not-valid`
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/invalid chromium extension id/i);
   });
 });

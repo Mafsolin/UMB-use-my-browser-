@@ -92,6 +92,32 @@ describe("BridgeService", () => {
     ).rejects.toThrow(/navigation is disabled/i);
   });
 
+  it("blocks submit when external side effects are disabled", async () => {
+    const service = new BridgeService(new FakeConnector());
+    const session = service.createSession({
+      clientId: "submit-check",
+      permissions: {
+        allowNavigation: true,
+        allowTyping: true,
+        allowExternalSideEffects: false
+      }
+    });
+
+    const tab = (await service.executeCommand({
+      type: "newTab",
+      sessionId: session.sessionId,
+      params: {}
+    })) as { id: string };
+
+    await expect(
+      service.executeCommand({
+        type: "submit",
+        sessionId: session.sessionId,
+        params: { tabId: tab.id, selector: "#go" }
+      })
+    ).rejects.toThrow(/side effects are disabled/i);
+  });
+
   it("returns scroll coordinates from the live connector contract", async () => {
     const service = new BridgeService(new FakeConnector());
     const session = service.createSession({

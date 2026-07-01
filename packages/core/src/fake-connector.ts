@@ -149,6 +149,14 @@ export class FakeConnector implements BrowserConnector {
     void value;
   }
 
+  async submit(tabId: string, selector: string): Promise<{ confirmed: boolean }> {
+    if (!this.tabs.has(tabId)) {
+      throw new Error(`Unknown tab: ${tabId}`);
+    }
+    void selector;
+    return { confirmed: true };
+  }
+
   async scroll(tabId: string, x: number, y: number): Promise<ScrollResult> {
     if (!this.tabs.has(tabId)) {
       throw new Error(`Unknown tab: ${tabId}`);
