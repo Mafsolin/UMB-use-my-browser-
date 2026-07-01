@@ -1,0 +1,8 @@
+node_modules/
+apps/**/dist/
+.tmp/
+.umb-runtime/
+coverage/
+*.log
+*.tmp
+apps/extension/icons/icon-master-circle.png

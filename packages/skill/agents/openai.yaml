@@ -1,0 +1,4 @@
+interface:
+  display_name: "UMB"
+  short_description: "Use the live UMB Chrome bridge safely."
+  default_prompt: "Use $use-my-browser to work through the live UMB bridge and the user's real Chrome session."

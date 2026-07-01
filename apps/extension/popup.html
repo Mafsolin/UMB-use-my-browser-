@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UMB</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101418;
+        --panel: #182028;
+        --text: #e8edf2;
+        --muted: #98a7b6;
+        --ok: #3ddc97;
+        --bad: #ff6b6b;
+        --line: #26303b;
+      }
+
+      body {
+        margin: 0;
+        width: 340px;
+        background: linear-gradient(180deg, #0d1117 0%, #151c24 100%);
+        color: var(--text);
+        font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+      }
+
+      .wrap {
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--bad);
+      }
+
+      .dot.ok {
+        background: var(--ok);
+      }
+
+      .grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .row {
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .value {
+        margin-top: 4px;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>UMB</h1>
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <strong id="summary">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1082;&#1072; &#1089;&#1086;&#1077;&#1076;&#1080;&#1085;&#1077;&#1085;&#1080;&#1103;...</strong>
+      </div>
+      <div class="grid">
+        <div class="row">
+          <div class="label">&#1057;&#1086;&#1089;&#1090;&#1086;&#1103;&#1085;&#1080;&#1077; &#1089;&#1077;&#1089;&#1089;&#1080;&#1080;</div>
+          <div id="sessionState" class="value">&#1054;&#1078;&#1080;&#1076;&#1072;&#1085;&#1080;&#1077;</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1048;&#1084;&#1103; &#1089;&#1077;&#1089;&#1089;&#1080;&#1080;</div>
+          <div id="sessionName" class="value">&#1053;&#1077;&#1090;</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1055;&#1088;&#1086;&#1094;&#1077;&#1089;&#1089; &#1084;&#1086;&#1089;&#1090;&#1072;</div>
+          <div id="daemonPid" class="value">Unknown</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1042;&#1082;&#1083;&#1072;&#1076;&#1086;&#1082; &#1087;&#1086;&#1076; &#1086;&#1090;&#1083;&#1072;&#1076;&#1082;&#1086;&#1081;</div>
+          <div id="debuggerSessions" class="value">0</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1042;&#1082;&#1083;&#1072;&#1076;&#1086;&#1082; &#1074; &#1089;&#1077;&#1089;&#1089;&#1080;&#1080;</div>
+          <div id="attachedTabs" class="value">0</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1055;&#1088;&#1086;&#1094;&#1077;&#1089;&#1089; native host</div>
+          <div id="nativePid" class="value">Unknown</div>
+        </div>
+        <div class="row">
+          <div class="label">WebSocket</div>
+          <div id="wsUrl" class="value">Unknown</div>
+        </div>
+        <div class="row">
+          <div class="label">HTTP health</div>
+          <div id="httpUrl" class="value">Unknown</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1048;&#1084;&#1103; &#1093;&#1086;&#1089;&#1090;&#1072;</div>
+          <div id="hostName" class="value">Unknown</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1055;&#1086;&#1076;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1085;&#1099;&#1081; &#1087;&#1088;&#1086;&#1094;&#1077;&#1089;&#1089;</div>
+          <div id="processLabel" class="value">&#1053;&#1077;&#1090; &#1076;&#1072;&#1085;&#1085;&#1099;&#1093;</div>
+        </div>
+        <div class="row">
+          <div class="label">&#1055;&#1086;&#1089;&#1083;&#1077;&#1076;&#1085;&#1103;&#1103; &#1086;&#1096;&#1080;&#1073;&#1082;&#1072;</div>
+          <div id="lastError" class="value">None</div>
+        </div>
+      </div>
+    </div>
+    <script src="./popup.js"></script>
+  </body>
+</html>
