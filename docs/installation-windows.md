@@ -7,6 +7,16 @@
 - A Chromium-family browser on Windows
 - `Comet` is a tested browser path, but not required
 
+## Agent-friendly install path
+
+If another agent only has the GitHub repo URL and needs UMB wired into Droid / Factory, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-droid-umb.ps1 -RepoUrl https://github.com/Mafsolin/UMB-use-my-browser-
+```
+
+That generic wrapper clones or updates the repo, builds it, writes `~/.factory/mcp.json`, starts the daemon, and installs the native host when the unpacked extension is already detectable.
+
 ## Install dependencies
 
 ```powershell

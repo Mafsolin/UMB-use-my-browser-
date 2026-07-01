@@ -14,6 +14,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-daemon.ps1
 node .\scripts\start-mcp.mjs
 ```
 
+## Droid / Factory Install
+
+If you want an agent to install UMB from a GitHub repo and wire MCP automatically, use the installer wrapper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-droid-umb.ps1 -RepoUrl https://github.com/Mafsolin/UMB-use-my-browser-
+```
+
+That flow will:
+
+- clone or update the repo into a local runtime directory
+- install dependencies and build the workspace
+- write a Droid / Factory MCP entry into `~/.factory/mcp.json`
+- start the local daemon
+- install the native host if the unpacked extension is already detectable
+
+The only step that may still require a browser click is `Load unpacked` for `apps/extension`, because Chromium does not provide a safe generic API for silently installing an unpacked extension into the active profile.
+
+More details: [docs/droid-cli.md](./docs/droid-cli.md)
+
 ## What UMB provides
 
 - real browser profile access
