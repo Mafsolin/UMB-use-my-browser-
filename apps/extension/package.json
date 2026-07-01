@@ -12,5 +12,8 @@
   },
   "dependencies": {
     "@umb/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "happy-dom": "^15.11.7"
   }
 }
