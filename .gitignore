@@ -1,8 +1,10 @@
 node_modules/
-apps/**/dist/
+**/dist/
 .tmp/
 .umb-runtime/
 coverage/
 *.log
 *.tmp
 apps/extension/icons/icon-master-circle.png
+.DS_Store
+

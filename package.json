@@ -11,13 +11,19 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.36.0",
     "@types/chrome": "^0.2.0",
     "@types/node": "^24.0.14",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "eslint": "^9.36.0",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.45.0",
     "vitest": "^3.2.4",
     "ws": "^8.21.0"
   }
