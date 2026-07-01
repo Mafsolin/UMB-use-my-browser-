@@ -1,0 +1,5 @@
+{
+  "name": "umb",
+  "description": "Live Chromium-session MCP bridge with local daemon, extension bootstrap, and Droid-friendly install flow",
+  "version": "0.1.0"
+}
