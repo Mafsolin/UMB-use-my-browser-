@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "baseUrl": "../..",
+    "paths": {
+      "@umb/core": ["packages/core/src/index.ts"],
+      "@umb/protocol": ["packages/protocol/src/index.ts"]
+    }
+  }
+}
