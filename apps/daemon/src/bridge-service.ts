@@ -1,8 +1,26 @@
-import type { BridgeCommand, BridgePermissions, BridgeSession } from "@umb/protocol";
+import type {
+  BridgeCommand,
+  BridgePermissions,
+  BridgeSession
+} from "@umb/protocol";
 import { FakeConnector, SessionManager, type BrowserConnector } from "@umb/core";
 import { createCommandRouter } from "./command-router.js";
 import { AuditLogger } from "./audit-log.js";
 import { TabSessionRegistry } from "./tab-session-registry.js";
+
+type CommandWithTabId = Extract<
+  BridgeCommand,
+  { params: { tabId: string } }
+>;
+
+function hasTabId(command: BridgeCommand): command is CommandWithTabId {
+  return (
+    command.type !== "openTabs" &&
+    command.type !== "newTab" &&
+    command.type !== "nameSession" &&
+    command.type !== "finalize"
+  );
+}
 
 export class BridgeService {
   private readonly sessionManager = new SessionManager();
@@ -95,7 +113,7 @@ export class BridgeService {
       if (command.type === "nameSession") {
         const result = this.sessionManager.nameSession(
           command.sessionId,
-          String(command.params.name)
+          command.params.name
         );
         await this.connector.updateSession?.({
           sessionId: result.sessionId,
@@ -119,8 +137,7 @@ export class BridgeService {
 
       if (command.type === "claimTab") {
         const result = await this.router(command);
-        const tabId = String(command.params.tabId);
-        this.tabRegistry.track(command.sessionId, tabId);
+        this.tabRegistry.track(command.sessionId, command.params.tabId);
         await this.writeAudit(session, command, "ok");
         return result;
       }
@@ -137,17 +154,14 @@ export class BridgeService {
       }
 
       if (command.type === "finalize") {
-        const keep =
-          ((command.params.keep as Array<{ id: string; status: "deliverable" | "handoff" }>) ??
-            []);
         const result = await this.connector.finalize({
           sessionId: command.sessionId,
-          keep,
+          keep: command.params.keep,
           ownedTabIds: this.tabRegistry.get(command.sessionId)
         });
         this.tabRegistry.replace(
           command.sessionId,
-          keep.map((entry) => entry.id)
+          command.params.keep.map((entry) => entry.id)
         );
         this.finalizedSessionIds.add(command.sessionId);
         if (this.activeSessionId === command.sessionId) {
@@ -184,7 +198,18 @@ export class BridgeService {
   }
 
   private getTabId(command: BridgeCommand): string | undefined {
-    return typeof command.params.tabId === "string" ? command.params.tabId : undefined;
+    return hasTabId(command) ? command.params.tabId : undefined;
+  }
+
+  private extractOrigin(command: BridgeCommand): string | undefined {
+    if (command.type !== "goto") {
+      return undefined;
+    }
+    try {
+      return new URL(command.params.url).origin;
+    } catch {
+      return undefined;
+    }
   }
 
   private async writeAudit(
@@ -194,7 +219,6 @@ export class BridgeService {
     tabId = this.getTabId(command),
     message?: string
   ): Promise<void> {
-    const origin = typeof command.params.url === "string" ? new URL(command.params.url).origin : undefined;
     await this.auditLogger.write({
       timestamp: new Date().toISOString(),
       sessionId: session.sessionId,
@@ -202,7 +226,7 @@ export class BridgeService {
       sessionName: session.name,
       commandType: command.type,
       tabId,
-      origin,
+      origin: this.extractOrigin(command),
       result,
       message
     });

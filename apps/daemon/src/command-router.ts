@@ -7,41 +7,51 @@ export function createCommandRouter(transport: BrowserConnector) {
       case "openTabs":
         return transport.openTabs();
       case "claimTab":
-        return transport.claimTab(String(command.params.tabId));
+        return transport.claimTab(command.params.tabId);
       case "newTab":
         return transport.newTab();
       case "goto":
-        return transport.goto(
-          String(command.params.tabId),
-          String(command.params.url)
-        );
+        return transport.goto(command.params.tabId, command.params.url);
       case "getUrl":
-        return transport.getUrl(String(command.params.tabId));
+        return transport.getUrl(command.params.tabId);
       case "getTitle":
-        return transport.getTitle(String(command.params.tabId));
+        return transport.getTitle(command.params.tabId);
       case "domSnapshot":
-        return transport.domSnapshot(String(command.params.tabId));
+        return transport.domSnapshot(command.params.tabId);
       case "click":
-        return transport.click(
-          String(command.params.tabId),
-          String(command.params.selector)
-        );
+        return transport.click(command.params.tabId, command.params.selector);
       case "fill":
         return transport.fill(
-          String(command.params.tabId),
-          String(command.params.selector),
-          String(command.params.value)
+          command.params.tabId,
+          command.params.selector,
+          command.params.value
         );
       case "scroll":
         return transport.scroll(
-          String(command.params.tabId),
-          Number(command.params.x),
-          Number(command.params.y)
+          command.params.tabId,
+          command.params.x,
+          command.params.y
         );
       case "screenshot":
-        return transport.screenshot(String(command.params.tabId));
-      default:
-        throw new Error(`Unsupported command: ${command.type}`);
+        return transport.screenshot(command.params.tabId);
+      case "nameSession":
+        return {
+          sessionId: command.sessionId,
+          name: command.params.name
+        };
+      case "finalize":
+        return transport.finalize({
+          sessionId: command.sessionId,
+          keep: command.params.keep,
+          ownedTabIds: []
+        });
+      default: {
+        const _exhaustive: never = command;
+        void _exhaustive;
+        throw new Error(
+          `Unsupported command: ${(command as { type: string }).type}`
+        );
+      }
     }
   };
 }

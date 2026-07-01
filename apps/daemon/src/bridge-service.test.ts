@@ -2,6 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { bridgeCommandSchema } from "@umb/protocol";
 import { FakeConnector } from "@umb/core";
 import { AuditLogger } from "./audit-log.js";
 import { BridgeService } from "./bridge-service.js";
@@ -307,5 +308,38 @@ describe("BridgeService", () => {
         params: { tabId: tab.id, url: "https://www.google.com/" }
       })
     ).rejects.toThrow(/already finalized/i);
+  });
+
+  it("rejects raw payloads whose tabId is not a string before reaching the router", async () => {
+    const connector = new FakeConnector();
+    const finalCalls: unknown[] = [];
+    connector.finalize = (async (request: { keep: unknown[]; sessionId: string; ownedTabIds: string[] }) => {
+      finalCalls.push(request);
+      return { kept: request.keep, closed: [], released: [] };
+    }) as never;
+
+    const service = new BridgeService(connector);
+    const session = service.createSession({
+      clientId: "umb-zod",
+      permissions: {
+        allowNavigation: true,
+        allowTyping: true,
+        allowExternalSideEffects: true
+      }
+    });
+
+    const parse = bridgeCommandSchema.safeParse({
+      type: "getTitle",
+      sessionId: session.sessionId,
+      params: { tabId: 999 }
+    });
+
+    expect(parse.success).toBe(false);
+
+    if (parse.success) {
+      await expect(service.executeCommand(parse.data)).rejects.toThrow();
+    }
+
+    expect(finalCalls).toHaveLength(0);
   });
 });
