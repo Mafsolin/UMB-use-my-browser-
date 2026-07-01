@@ -1,0 +1,413 @@
+import {
+  extensionState,
+  NAVIGATION_POLL_MS,
+  NAVIGATION_TIMEOUT_MS,
+  TAB_GROUP_TITLE,
+  type SessionState,
+  type SimplifiedTab,
+  type StatusResponse
+} from "./bridge-state.js";
+import {
+  attachDebugger,
+  detachDebuggerNow,
+  ensureControlledTab,
+  forceDetachDebugger,
+  runDebuggerCommand
+} from "./debugger.js";
+import { evaluateOnControlledTab } from "./dom.js";
+import { syncSessionStatus, getStatusResponse } from "./status.js";
+import {
+  isCommittedNavigation,
+  isUsableNavigationState
+} from "./background-runtime-helpers.js";
+
+export function tabIdFromString(value: string): number {
+  const tabId = Number(value);
+  if (!Number.isInteger(tabId)) {
+    throw new Error(`Invalid tab id: ${value}`);
+  }
+  return tabId;
+}
+
+export async function getTabIfExists(tabId: number): Promise<chrome.tabs.Tab | undefined> {
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getTabGroupTitle(groupId?: number): Promise<string | undefined> {
+  if (groupId == null || groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+    return undefined;
+  }
+  try {
+    const group = await chrome.tabGroups.get(groupId);
+    return group.title;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function simplifyTab(tab: chrome.tabs.Tab): Promise<SimplifiedTab> {
+  const entry = extensionState.registry.get(tab.id ?? -1);
+  const tabGroup = await getTabGroupTitle(tab.groupId);
+  return {
+    id: String(tab.id),
+    title: tab.title,
+    url: tab.url,
+    active: tab.active,
+    kind:
+      entry?.keptStatus ??
+      (entry?.createdByUmb ? "temporary" : entry?.claimed ? "claimed" : "user"),
+    tabGroup: entry?.tabGroup ?? tabGroup
+  };
+}
+
+export function getSessionOrThrow(sessionId: string): SessionState {
+  const session = extensionState.sessions.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown UMB session ${sessionId}.`);
+  }
+  return session;
+}
+
+export function recordTabForSession(sessionId: string, tabId: number) {
+  const session = getSessionOrThrow(sessionId);
+  session.tabIds.add(tabId);
+}
+
+export function removeTabFromSessions(tabId: number) {
+  for (const session of extensionState.sessions.values()) {
+    session.tabIds.delete(tabId);
+  }
+}
+
+export function purgeTrackedTab(tabId: number) {
+  extensionState.attachedTabs.delete(tabId);
+  removeTabFromSessions(tabId);
+  extensionState.registry.delete(tabId);
+  syncSessionStatus();
+}
+
+export async function getActiveTabInWindow(windowId: number): Promise<chrome.tabs.Tab | undefined> {
+  const [activeTab] = await chrome.tabs.query({ active: true, windowId });
+  return activeTab;
+}
+
+export async function getUmbTabGroupId(windowId: number): Promise<number | undefined> {
+  const groups = await chrome.tabGroups.query({ windowId });
+  return groups.find((group) => group.title === TAB_GROUP_TITLE)?.id;
+}
+
+export async function addTabToUmbGroup(
+  tabId: number,
+  windowId: number
+): Promise<string | undefined> {
+  try {
+    const existingGroupId = await getUmbTabGroupId(windowId);
+    const groupId =
+      existingGroupId == null
+        ? await chrome.tabs.group({ tabIds: [tabId] })
+        : await chrome.tabs.group({ groupId: existingGroupId, tabIds: [tabId] });
+    await chrome.tabGroups.update(groupId, { collapsed: false, title: TAB_GROUP_TITLE });
+    return TAB_GROUP_TITLE;
+  } catch (error) {
+    console.warn("UMB could not group the tab.", error);
+    return undefined;
+  }
+}
+
+export async function cleanupStaleTemporaryTabs(): Promise<void> {
+  const staleEntries = extensionState.registry
+    .values()
+    .filter((entry) => entry.createdByUmb && !entry.sessionId);
+  for (const entry of staleEntries) {
+    await detachDebuggerNow(entry.tabId);
+    const liveTab = await getTabIfExists(entry.tabId);
+    if (liveTab) {
+      await chrome.tabs.remove(entry.tabId).catch(() => undefined);
+    }
+    extensionState.registry.delete(entry.tabId);
+  }
+  if (staleEntries.length > 0) {
+    syncSessionStatus();
+  }
+}
+
+export function looksUsable(url: string | undefined) {
+  return Boolean(url && !url.startsWith("about:blank") && !url.startsWith("chrome://newtab"));
+}
+
+export function isUmbResidueTab(tab: chrome.tabs.Tab, tabGroup?: string): boolean {
+  if (tab.id == null) {
+    return false;
+  }
+  const entry = extensionState.registry.get(tab.id);
+  return (
+    (tab.url === "chrome://newtab/" || tab.url === "about:blank") &&
+    tabGroup === TAB_GROUP_TITLE &&
+    !entry?.sessionId &&
+    !entry?.keptStatus
+  );
+}
+
+export async function cleanupStaleUmbGroupResidue(): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (tab.id == null) {
+      continue;
+    }
+    const tabGroup = await getTabGroupTitle(tab.groupId);
+    if (!isUmbResidueTab(tab, tabGroup)) {
+      continue;
+    }
+    await detachDebuggerNow(tab.id);
+    await chrome.tabs.remove(tab.id).catch(() => undefined);
+    extensionState.registry.delete(tab.id);
+    removeTabFromSessions(tab.id);
+  }
+  syncSessionStatus();
+}
+
+export async function probeTabState(sessionId: string, tabId: number) {
+  const tab = await getTabIfExists(tabId);
+  if (!tab) {
+    purgeTrackedTab(tabId);
+    throw new Error(`Tab ${tabId} is missing before readiness probing.`);
+  }
+
+  const href = await evaluateOnControlledTab<string>(sessionId, tabId, "location.href").catch(
+    () => tab.url ?? ""
+  );
+  const readyState = await evaluateOnControlledTab<string>(
+    sessionId,
+    tabId,
+    "document.readyState"
+  ).catch(() => (tab.status === "complete" ? "complete" : "loading"));
+  const title = await evaluateOnControlledTab<string>(sessionId, tabId, "document.title").catch(
+    () => tab.title ?? ""
+  );
+  const documentHtml = await evaluateOnControlledTab<string>(
+    sessionId,
+    tabId,
+    "document.documentElement?.outerHTML ?? ''"
+  ).catch(() => "");
+
+  return {
+    documentHtml,
+    href,
+    readyState,
+    status: tab.status,
+    title,
+    url: tab.url
+  };
+}
+
+export async function waitForUsableNavigation(
+  sessionId: string,
+  tabId: number,
+  requestedUrl: string
+): Promise<void> {
+  const startedAt = Date.now();
+  let sawCommittedUrl = false;
+
+  while (Date.now() - startedAt < NAVIGATION_TIMEOUT_MS) {
+    const tab = await getTabIfExists(tabId);
+    if (!tab) {
+      purgeTrackedTab(tabId);
+      throw new Error(`Tab ${tabId} is missing before navigation became usable.`);
+    }
+
+    const state = await probeTabState(sessionId, tabId);
+    if (isCommittedNavigation(state, requestedUrl)) {
+      sawCommittedUrl = true;
+    }
+
+    if (sawCommittedUrl && isUsableNavigationState(state, requestedUrl)) {
+      return;
+    }
+
+    if (requestedUrl.startsWith("data:") && !sawCommittedUrl && looksUsable(tab.url)) {
+      throw new Error(`Comet blocked navigation to ${requestedUrl} on tab ${tabId}.`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, NAVIGATION_POLL_MS));
+  }
+
+  if (!sawCommittedUrl) {
+    throw new Error(`Navigation never committed for tab ${tabId}.`);
+  }
+  throw new Error(`Timed out before tab ${tabId} reached a usable page state.`);
+}
+
+export async function startSession(
+  sessionId: string,
+  clientId: string,
+  name?: string
+): Promise<StatusResponse> {
+  await cleanupDanglingSessionEntries();
+  await cleanupStaleTemporaryTabs();
+  await cleanupStaleUmbGroupResidue();
+
+  const existing = extensionState.sessions.get(sessionId);
+  if (existing) {
+    existing.name = name ?? existing.name;
+    extensionState.activeSessionId = sessionId;
+    syncSessionStatus();
+    return getStatusResponse();
+  }
+
+  extensionState.sessions.set(sessionId, {
+    clientId,
+    name,
+    sessionId,
+    tabIds: new Set<number>()
+  });
+  extensionState.activeSessionId = sessionId;
+  syncSessionStatus();
+  return getStatusResponse();
+}
+
+export async function openTabs(): Promise<SimplifiedTab[]> {
+  await cleanupStaleTemporaryTabs();
+  await cleanupStaleUmbGroupResidue();
+  const tabs = await chrome.tabs.query({});
+  const eligibleTabs = tabs.filter((tab) => tab.id != null);
+  return Promise.all(eligibleTabs.map((tab) => simplifyTab(tab)));
+}
+
+export async function claimTab(sessionId: string, tabId: number): Promise<SimplifiedTab> {
+  getSessionOrThrow(sessionId);
+  const tab = await getTabIfExists(tabId);
+  if (!tab) {
+    purgeTrackedTab(tabId);
+    throw new Error(`No tab with id: ${tabId}.`);
+  }
+
+  try {
+    await attachDebugger(tabId, "background");
+  } catch (backgroundError) {
+    const previousActiveTab =
+      tab.windowId != null ? await getActiveTabInWindow(tab.windowId) : undefined;
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+      await attachDebugger(tabId, "foreground");
+    } catch (foregroundError) {
+      await forceDetachDebugger(tabId);
+      const backgroundMessage =
+        backgroundError instanceof Error ? backgroundError.message : String(backgroundError);
+      const foregroundMessage =
+        foregroundError instanceof Error ? foregroundError.message : String(foregroundError);
+      throw new Error(
+        `Debugger attach failed for claimed tab ${tabId}. Background attempt: ${backgroundMessage}. Foreground retry: ${foregroundMessage}.`
+      );
+    } finally {
+      if (previousActiveTab?.id != null && previousActiveTab.id !== tabId) {
+        await chrome.tabs.update(previousActiveTab.id, { active: true }).catch(() => undefined);
+      }
+    }
+  }
+
+  recordTabForSession(sessionId, tabId);
+  extensionState.registry.markClaimed(tabId, sessionId);
+  return simplifyTab((await getTabIfExists(tabId)) ?? tab);
+}
+
+export async function newTab(sessionId: string): Promise<SimplifiedTab> {
+  getSessionOrThrow(sessionId);
+  await cleanupStaleTemporaryTabs();
+
+  const createdTab = await chrome.tabs.create({ active: false, url: "about:blank" });
+  if (createdTab.id == null || createdTab.windowId == null) {
+    throw new Error("Chrome did not return a tab id.");
+  }
+
+  const tabGroup = await addTabToUmbGroup(createdTab.id, createdTab.windowId);
+  const canonicalTab = await getTabIfExists(createdTab.id);
+  if (!canonicalTab?.id) {
+    purgeTrackedTab(createdTab.id);
+    throw new Error(`New UMB tab ${createdTab.id} disappeared before it became stable.`);
+  }
+
+  recordTabForSession(sessionId, canonicalTab.id);
+  extensionState.registry.markCreated(canonicalTab.id, sessionId, tabGroup);
+  try {
+    await attachDebugger(canonicalTab.id);
+  } catch (error) {
+    getSessionOrThrow(sessionId).tabIds.delete(canonicalTab.id);
+    extensionState.registry.delete(canonicalTab.id);
+    throw error;
+  }
+  return simplifyTab(canonicalTab);
+}
+
+export async function goto(sessionId: string, tabId: number, url: string): Promise<void> {
+  await ensureControlledTab(sessionId, tabId);
+  const result = await runDebuggerCommand<{ errorText?: string }>(
+    tabId,
+    "Page.navigate",
+    { url },
+    "navigate"
+  );
+  if (result?.errorText) {
+    throw new Error(`Browser blocked navigation to ${url} on tab ${tabId}: ${result.errorText}`);
+  }
+  await waitForUsableNavigation(sessionId, tabId, url);
+}
+
+export async function getUrl(sessionId: string, tabId: number): Promise<string | undefined> {
+  await ensureControlledTab(sessionId, tabId);
+  const tab = await getTabIfExists(tabId);
+  if (!tab) {
+    purgeTrackedTab(tabId);
+    throw new Error(`No tab with id: ${tabId}.`);
+  }
+  return tab.url;
+}
+
+export async function getTitle(sessionId: string, tabId: number): Promise<string | undefined> {
+  await ensureControlledTab(sessionId, tabId);
+  const tab = await getTabIfExists(tabId);
+  if (!tab) {
+    purgeTrackedTab(tabId);
+    throw new Error(`No tab with id: ${tabId}.`);
+  }
+  return tab.title;
+}
+
+export async function nameSession(
+  sessionId: string,
+  name: string
+): Promise<StatusResponse> {
+  const session = extensionState.sessions.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown UMB session ${sessionId}.`);
+  }
+  session.name = name;
+  extensionState.activeSessionId = sessionId;
+  syncSessionStatus();
+  return getStatusResponse();
+}
+
+async function cleanupDanglingSessionEntries(): Promise<void> {
+  const danglingEntries = extensionState.registry
+    .values()
+    .filter((entry) => entry.sessionId && !extensionState.sessions.has(entry.sessionId));
+  for (const entry of danglingEntries) {
+    await detachDebuggerNow(entry.tabId);
+    removeTabFromSessions(entry.tabId);
+    if (entry.createdByUmb && !entry.keptStatus) {
+      const liveTab = await getTabIfExists(entry.tabId);
+      if (liveTab) {
+        await chrome.tabs.remove(entry.tabId).catch(() => undefined);
+      }
+      extensionState.registry.delete(entry.tabId);
+      continue;
+    }
+    extensionState.registry.markDetached(entry.tabId);
+  }
+  if (danglingEntries.length > 0) {
+    syncSessionStatus();
+  }
+}

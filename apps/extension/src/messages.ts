@@ -20,6 +20,7 @@ export type ExtensionRequest =
     }
   | { id: string; type: "scroll"; payload: { sessionId: string; tabId: string; x: number; y: number } }
   | { id: string; type: "screenshot"; payload: { sessionId: string; tabId: string } }
+  | { id: string; type: "submit"; payload: { sessionId: string; tabId: string; selector: string } }
   | {
       id: string;
       type: "nameSession";
