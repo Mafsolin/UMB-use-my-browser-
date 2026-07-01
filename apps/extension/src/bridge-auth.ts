@@ -1,8 +1,12 @@
 export const DEFAULT_BRIDGE_PROTOCOL = "umb-v1";
 const BEARER_PROTOCOL_PREFIX = "bearer.";
 
+export function hasBridgeBearerToken(token: string | undefined): boolean {
+  return typeof token === "string" && token.trim().length > 0;
+}
+
 export function buildBridgeSubprotocols(token: string | undefined): string[] {
-  if (!token) {
+  if (!hasBridgeBearerToken(token)) {
     return [DEFAULT_BRIDGE_PROTOCOL];
   }
   return [DEFAULT_BRIDGE_PROTOCOL, `${BEARER_PROTOCOL_PREFIX}${token}`];

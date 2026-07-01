@@ -284,11 +284,11 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
     },
     async (input) => {
       const sessionId = await resolveSessionId(input);
-      const result = (await service.executeCommand({
+      await service.executeCommand({
         type: "submit",
         sessionId,
         params: { tabId: input.tabId, selector: input.selector }
-      })) as { confirmed: boolean };
+      });
       return {
         content: [
           {

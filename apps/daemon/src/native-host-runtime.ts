@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const DAEMON_HTTP_URL = process.env.UMB_DAEMON_HTTP_URL ?? "http://127.0.0.1:44777";
 const DAEMON_WS_URL = process.env.UMB_DAEMON_WS_URL ?? "ws://127.0.0.1:44777/extension";
@@ -9,6 +10,7 @@ const HOST_NAME = "com.umb.use_my_browser";
 
 type NativeHostRequest = {
   type?: string;
+  extensionId?: string;
 };
 
 type AuthBootstrap = {
@@ -38,9 +40,17 @@ async function daemonHealthy(): Promise<boolean> {
   }
 }
 
-async function fetchAuthBootstrap(): Promise<AuthBootstrap | null> {
+export function buildAuthBootstrapUrl(extensionId: string | undefined): string {
+  const url = new URL(`${DAEMON_HTTP_URL}/internal/auth-bootstrap`);
+  if (extensionId) {
+    url.searchParams.set("extensionId", extensionId);
+  }
+  return url.toString();
+}
+
+async function fetchAuthBootstrap(extensionId: string | undefined): Promise<AuthBootstrap | null> {
   try {
-    const response = await fetch(`${DAEMON_HTTP_URL}/internal/auth-bootstrap`);
+    const response = await fetch(buildAuthBootstrapUrl(extensionId));
     if (!response.ok) {
       return null;
     }
@@ -110,7 +120,7 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
     }
   })();
 
-  const auth = await fetchAuthBootstrap();
+  let auth = await fetchAuthBootstrap(request.extensionId);
 
   const baseResponse = {
     daemonHttpUrl: DAEMON_HTTP_URL,
@@ -130,8 +140,9 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
         ...baseResponse
       };
     case "getDaemonInfo":
-    case undefined:
+    case undefined: {
       await ensureDaemonRunning();
+      auth = await fetchAuthBootstrap(request.extensionId);
       const refreshedHealth = await fetch(`${DAEMON_HTTP_URL}/health`).then((response) =>
         response.json()
       ) as {
@@ -146,6 +157,7 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
         daemonPid: refreshedHealth?.daemon?.pid,
         daemonStartedAt: refreshedHealth?.daemon?.startedAt
       };
+    }
     default:
       return {
         ok: false,
@@ -201,11 +213,17 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  writeMessage({
-    ok: false,
-    hostName: HOST_NAME,
-    error: error instanceof Error ? error.message : String(error)
+const isMainModule =
+  typeof process.argv[1] === "string" &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  main().catch((error) => {
+    writeMessage({
+      ok: false,
+      hostName: HOST_NAME,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBridgeSubprotocols } from "./bridge-auth.js";
+import { buildBridgeSubprotocols, hasBridgeBearerToken } from "./bridge-auth.js";
 
 describe("buildBridgeSubprotocols", () => {
   it("includes the bearer subprotocol when a token is provided", () => {
@@ -20,5 +20,12 @@ describe("buildBridgeSubprotocols", () => {
   it("preserves the bearer prefix verbatim for the daemon to validate", () => {
     const token = "01ab-cdef-2345";
     expect(buildBridgeSubprotocols(token)).toContain(`bearer.${token}`);
+  });
+
+  it("treats blank bridge tokens as missing", () => {
+    expect(hasBridgeBearerToken(undefined)).toBe(false);
+    expect(hasBridgeBearerToken("")).toBe(false);
+    expect(hasBridgeBearerToken("   ")).toBe(false);
+    expect(hasBridgeBearerToken("token")).toBe(true);
   });
 });
