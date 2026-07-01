@@ -57,6 +57,7 @@ http://127.0.0.1:44777/umb-test-page
 
 - `claimTab` may return `Another debugger is already attached ...` when another browser tool or debugger already owns that tab.
 - `data:` navigation is not a required Comet acceptance path for UMB v1. Use the local UMB test page for interaction checks instead.
+- The live bridge relies on localhost bootstrap plus bearer-token and Origin validation, not on a literal WebSocket `Authorization` header.
 
 ## Skill usage
 

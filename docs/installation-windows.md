@@ -33,7 +33,7 @@ pnpm build
 
 This follows the flow:
 
-`browser extension -> native host -> UMB daemon -> extension WebSocket bridge`
+`browser extension -> native host -> localhost auth bootstrap -> UMB daemon -> extension WebSocket bridge`
 
 After the unpacked extension is loaded once, run:
 
@@ -48,6 +48,17 @@ Expected result:
 - the extension is detected in the current browser profile, or you provide `UMB_EXTENSION_ID`
 - the native host manifest exists under `%LOCALAPPDATA%\UMB\native-host\`
 - registry keys are written for Chromium-family browsers, including optional `Comet` support
+
+## Bridge security model
+
+- the daemon generates an ephemeral bearer token at startup for the extension bridge
+- the native host fetches bridge bootstrap data from the localhost-only auth endpoint
+- the extension does not attempt the WebSocket bridge until bootstrap returns a bearer token
+- the WebSocket handshake validates both:
+  - a matching `bearer.<token>` subprotocol
+  - an allowed `chrome-extension://<id>/` Origin in the production bootstrap path
+- `chrome-extension://*` is an internal fallback/dev-oriented default and should not be treated as the production trust model
+- a literal `Authorization` header is not used for the browser WebSocket because Chromium extension WebSocket APIs do not provide custom header control
 
 ## Start the daemon
 
@@ -88,6 +99,11 @@ Local interaction test page:
 ```text
 http://127.0.0.1:44777/umb-test-page
 ```
+
+Repository status proof-points:
+
+- `LICENSE` is present in the repo root and recognized by GitHub as MIT
+- `.github/workflows/ci.yml` runs CI on `push` and `pull_request`
 
 ## Run the MCP surface
 
