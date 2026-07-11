@@ -178,7 +178,14 @@ export async function connectToDaemon(nextSocketUrl: string) {
   });
 
   currentSocket.addEventListener("message", async (event) => {
-    const request = JSON.parse(String(event.data)) as Parameters<typeof handleRequest>[0];
+    let request: Parameters<typeof handleRequest>[0];
+    try {
+      request = JSON.parse(String(event.data)) as Parameters<typeof handleRequest>[0];
+    } catch (error) {
+      console.warn("UMB received an invalid JSON request from the bridge.", error);
+      return;
+    }
+
     try {
       const result = await handleRequest(request);
       await sendResponse({ id: request.id, ok: true, result });

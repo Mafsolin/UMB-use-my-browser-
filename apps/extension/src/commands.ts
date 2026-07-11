@@ -95,6 +95,8 @@ export async function handleRequest(message: ExtensionRequest): Promise<unknown>
         message.payload.keep as FinalizeKeepEntry[],
         message.payload.ownedTabIds
       );
+    default:
+      throw new Error(`Unknown extension command: ${(message as { type: string }).type}.`);
   }
 }
 

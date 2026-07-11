@@ -23,14 +23,21 @@ export async function withTimeout<T>(
   label: string,
   timeoutMs = DEBUGGER_STAGE_TIMEOUT_MS
 ): Promise<T> {
-  return await Promise.race([
-    operation,
-    new Promise<T>((_resolve, reject) => {
-      setTimeout(() => {
-        reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
-      }, timeoutMs);
-    })
-  ]);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeout != null) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export async function refreshAttachedTabsFromBrowser(): Promise<void> {

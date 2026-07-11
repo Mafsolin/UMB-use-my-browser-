@@ -1,5 +1,6 @@
 import http from "node:http";
-import { bridgeCommandSchema } from "@umb/protocol";
+import { bridgeCommandSchema, bridgePermissionsSchema } from "@umb/protocol";
+import { z, ZodError } from "zod";
 import { BridgeService } from "./bridge-service.js";
 import { routes } from "./routes.js";
 import type { BridgeAuthConfig } from "./extension-connector.js";
@@ -7,6 +8,10 @@ import type { BridgeAuthConfig } from "./extension-connector.js";
 const serverStartedAt = new Date().toISOString();
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 const htmlHeaders = { "content-type": "text/html; charset=utf-8" };
+const createSessionSchema = z.object({
+  clientId: z.string().min(1),
+  permissions: bridgePermissionsSchema
+}).strict();
 const loopbackAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 const umbTestPageHtml = `<!doctype html>
 <html lang="en">
@@ -138,14 +143,7 @@ export function createServer(
       }
 
       if (req.method === "POST" && requestUrl.pathname === routes.createSession) {
-        const body = (await readJsonBody(req)) as {
-          clientId: string;
-          permissions: {
-            allowNavigation: boolean;
-            allowTyping: boolean;
-            allowExternalSideEffects: boolean;
-          };
-        };
+        const body = createSessionSchema.parse(await readJsonBody(req));
         const session = service.createSession(body);
         res.writeHead(201, jsonHeaders);
         res.end(JSON.stringify(session));
@@ -185,7 +183,8 @@ export function createServer(
       res.writeHead(404);
       res.end();
     } catch (error) {
-      res.writeHead(500, jsonHeaders);
+      const status = error instanceof SyntaxError || error instanceof ZodError ? 400 : 500;
+      res.writeHead(status, jsonHeaders);
       res.end(
         JSON.stringify({
           error: error instanceof Error ? error.message : String(error)
