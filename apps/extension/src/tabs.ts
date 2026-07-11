@@ -314,11 +314,11 @@ export async function claimTab(sessionId: string, tabId: number): Promise<Simpli
   return simplifyTab((await getTabIfExists(tabId)) ?? tab);
 }
 
-export async function newTab(sessionId: string): Promise<SimplifiedTab> {
+export async function newTab(sessionId: string, url?: string): Promise<SimplifiedTab> {
   getSessionOrThrow(sessionId);
   await cleanupStaleTemporaryTabs();
 
-  const createdTab = await chrome.tabs.create({ active: false, url: "about:blank" });
+  const createdTab = await chrome.tabs.create({ active: false, url: url ?? "about:blank" });
   if (createdTab.id == null || createdTab.windowId == null) {
     throw new Error("Chrome did not return a tab id.");
   }
@@ -334,6 +334,9 @@ export async function newTab(sessionId: string): Promise<SimplifiedTab> {
   extensionState.registry.markCreated(canonicalTab.id, sessionId, tabGroup);
   try {
     await attachDebugger(canonicalTab.id);
+    if (url) {
+      await waitForUsableNavigation(sessionId, canonicalTab.id, url);
+    }
   } catch (error) {
     getSessionOrThrow(sessionId).tabIds.delete(canonicalTab.id);
     extensionState.registry.delete(canonicalTab.id);

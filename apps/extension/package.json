@@ -6,14 +6,20 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@umb/protocol": "workspace:*"
+    "@mixmark-io/domino": "^2.2.0",
+    "@mozilla/readability": "^0.6.0",
+    "@umb/protocol": "workspace:*",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "esbuild": "^0.28.1",
     "happy-dom": "^15.11.7"
   }
 }

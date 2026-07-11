@@ -26,8 +26,19 @@ vi.mock("./status.js", () => ({
 }));
 
 import { handleRequest } from "./commands.js";
+import { newTab } from "./tabs.js";
 
 describe("handleRequest", () => {
+  it("forwards a new-tab URL", async () => {
+    await handleRequest({
+      id: "request-1",
+      type: "newTab",
+      payload: { sessionId: "session-1", url: "https://www.google.com/" }
+    });
+
+    expect(newTab).toHaveBeenCalledWith("session-1", "https://www.google.com/");
+  });
+
   it("rejects an unknown extension command explicitly", async () => {
     await expect(
       handleRequest({ id: "request-1", type: "notACommand" } as never)

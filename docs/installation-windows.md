@@ -140,7 +140,7 @@ Register the server under `use-my-browser` or a local alias such as `umb`.
 - `Browser user data directory does not exist: ...`
   Point `UMB_BROWSER_USER_DATA_DIR` at the correct Chromium-family profile root.
 - `Tab <id> is unknown to this session.`
-  Call `umb_claim_tab` first for an existing tab, or create a fresh one with `umb_new_tab`.
+  Call `claim_tab` first for an existing tab, or create a fresh one with `new_tab`.
 - `Another debugger is already attached to the tab with id: ...`
   Another browser tool, debugger, or extension already owns that tab. Pick another tab or release the external debugger first.
 - `Navigation is disabled for session ...`

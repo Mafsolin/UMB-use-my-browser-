@@ -9,13 +9,26 @@ export function createCommandRouter(transport: BrowserConnector) {
       case "claimTab":
         return transport.claimTab(command.params.tabId);
       case "newTab":
-        return transport.newTab();
+        return transport.newTab(command.params.url);
       case "goto":
         return transport.goto(command.params.tabId, command.params.url);
       case "getUrl":
         return transport.getUrl(command.params.tabId);
       case "getTitle":
         return transport.getTitle(command.params.tabId);
+      case "readPage":
+        return transport.readPage(command.params.tabId, {
+          format: command.params.format,
+          maxChars: command.params.maxChars,
+          includeMetadata: command.params.includeMetadata
+        });
+      case "findControls":
+        return transport.findControls(command.params.tabId, {
+          ...(command.params.query === undefined ? {} : { query: command.params.query }),
+          ...(command.params.kind === undefined ? {} : { kind: command.params.kind }),
+          visibleOnly: command.params.visibleOnly,
+          limit: command.params.limit
+        });
       case "domSnapshot":
         return transport.domSnapshot(command.params.tabId);
       case "click":

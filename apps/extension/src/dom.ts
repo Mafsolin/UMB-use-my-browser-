@@ -1,5 +1,13 @@
 import { ensureControlledTab, runDebuggerCommand } from "./debugger.js";
 import { redactSnapshot } from "./redaction.js";
+import {
+  extractReadPage,
+  findReadPageControls,
+  type FindControlsOptions,
+  type FindControlsResult,
+  type ReadPageOptions,
+  type ReadPageResult
+} from "./page-extractor.js";
 
 export type DomSnapshotPayload = {
   url: string;
@@ -40,6 +48,64 @@ export async function evaluateOnControlledTab<T>(
   }
 
   return result.result.value as T;
+}
+
+export async function readPage(
+  sessionId: string,
+  tabId: number,
+  options: ReadPageOptions
+): Promise<ReadPageResult> {
+  const raw = await evaluateOnControlledTab<{
+    url: string;
+    title: string;
+    documentHtml: string;
+  }>(
+    sessionId,
+    tabId,
+    `(() => {
+      const clone = document.documentElement.cloneNode(true);
+      for (const selector of ["input[type='password']", "[autocomplete^='cc-']", "[data-sensitive]"]) {
+        clone.querySelectorAll(selector).forEach((element) => {
+          if (element instanceof HTMLInputElement) {
+            element.value = "[UMB REDACTED]";
+            element.setAttribute("value", "[UMB REDACTED]");
+          }
+          element.textContent = "[UMB REDACTED]";
+        });
+      }
+      return { url: location.href, title: document.title, documentHtml: clone.outerHTML };
+    })()`
+  );
+  return extractReadPage({ ...raw, redacted: true }, options);
+}
+
+export async function findControls(
+  sessionId: string,
+  tabId: number,
+  options: FindControlsOptions
+): Promise<FindControlsResult> {
+  const raw = await evaluateOnControlledTab<{
+    url: string;
+    title: string;
+    documentHtml: string;
+  }>(
+    sessionId,
+    tabId,
+    `(() => {
+      const clone = document.documentElement.cloneNode(true);
+      for (const selector of ["input[type='password']", "[autocomplete^='cc-']", "[data-sensitive]"]) {
+        clone.querySelectorAll(selector).forEach((element) => {
+          if (element instanceof HTMLInputElement) {
+            element.value = "[UMB REDACTED]";
+            element.setAttribute("value", "[UMB REDACTED]");
+          }
+          element.textContent = "[UMB REDACTED]";
+        });
+      }
+      return { url: location.href, title: document.title, documentHtml: clone.outerHTML };
+    })()`
+  );
+  return findReadPageControls({ ...raw, redacted: true }, options);
 }
 
 export async function domSnapshot(sessionId: string, tabId: number): Promise<DomSnapshotPayload> {

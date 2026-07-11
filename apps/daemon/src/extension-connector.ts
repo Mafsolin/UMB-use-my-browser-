@@ -3,7 +3,10 @@ import type {
   BrowserConnector,
   BridgeTab,
   DomSnapshotResult,
+  FindControlsOptions,
+  FindControlsResult,
   FinalizeRequest,
+  ReadPageResult,
   ScrollResult
 } from "@umb/core";
 
@@ -234,9 +237,10 @@ export class ExtensionConnector implements BrowserConnector {
     });
   }
 
-  async newTab(): Promise<BridgeTab> {
+  async newTab(url?: string): Promise<BridgeTab> {
     return this.send("newTab", {
-      sessionId: this.getCurrentSessionId()
+      sessionId: this.getCurrentSessionId(),
+      ...(url === undefined ? {} : { url })
     });
   }
 
@@ -259,6 +263,25 @@ export class ExtensionConnector implements BrowserConnector {
     return this.send("getTitle", {
       sessionId: this.getCurrentSessionId(),
       tabId
+    });
+  }
+
+  async readPage(
+    tabId: string,
+    options: { format: "markdown" | "text"; maxChars?: number; includeMetadata: boolean }
+  ): Promise<ReadPageResult> {
+    return this.send("readPage", {
+      sessionId: this.getCurrentSessionId(),
+      tabId,
+      ...options
+    });
+  }
+
+  async findControls(tabId: string, options: FindControlsOptions): Promise<FindControlsResult> {
+    return this.send("findControls", {
+      sessionId: this.getCurrentSessionId(),
+      tabId,
+      ...options
     });
   }
 

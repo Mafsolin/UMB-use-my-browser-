@@ -3,7 +3,7 @@
 [![CI](https://github.com/Mafsolin/UMB-use-my-browser-/actions/workflows/ci.yml/badge.svg)](https://github.com/Mafsolin/UMB-use-my-browser-/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-UMB is a local browser bridge for live Chromium-backed automation. It preserves the strongest parts of the Codex Chrome bridge while exposing a neutral local surface for multiple CLIs through MCP.
+UMB is a local browser bridge for live Chromium-backed automation. It preserves the strongest parts of the Codex Chrome bridge while exposing a neutral local surface for multiple CLIs through MCP. For browser-required work, UMB is browser-only: use the local bridge and the user's real browser, not HTTP, search, static fetches, or another browser surface; report the path as blocked if the bridge is unavailable.
 
 ## Quick Start
 

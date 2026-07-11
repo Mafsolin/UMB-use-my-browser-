@@ -123,7 +123,7 @@ export class BridgeService {
         return result;
       }
 
-      if (command.type === "goto") {
+      if (command.type === "goto" || (command.type === "newTab" && command.params.url)) {
         this.sessionManager.assertAllowed(command.sessionId, "navigate");
       }
 
@@ -206,11 +206,15 @@ export class BridgeService {
   }
 
   private extractOrigin(command: BridgeCommand): string | undefined {
-    if (command.type !== "goto") {
+    if (command.type !== "goto" && command.type !== "newTab") {
+      return undefined;
+    }
+    const url = command.params.url;
+    if (!url) {
       return undefined;
     }
     try {
-      return new URL(command.params.url).origin;
+      return new URL(url).origin;
     } catch {
       return undefined;
     }

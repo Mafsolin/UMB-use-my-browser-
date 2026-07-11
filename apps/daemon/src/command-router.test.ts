@@ -6,11 +6,11 @@ import {
 import { createCommandRouter } from "./command-router.js";
 
 describe("command router", () => {
-  it("routes newTab to the browser transport", async () => {
-    let called = false;
+  it("routes newTab URL to the browser transport", async () => {
+    let calledWith: string | undefined;
     const router = createCommandRouter({
-      newTab: async () => {
-        called = true;
+      newTab: async (url?: string) => {
+        calledWith = url;
         return { id: "1" };
       }
     } as never);
@@ -18,10 +18,10 @@ describe("command router", () => {
     await router({
       type: "newTab",
       sessionId: "123e4567-e89b-12d3-a456-426614174000",
-      params: {}
+      params: { url: "https://www.google.com/" }
     });
 
-    expect(called).toBe(true);
+    expect(calledWith).toBe("https://www.google.com/");
   });
 
   it("forwards typed goto params without coercion", async () => {

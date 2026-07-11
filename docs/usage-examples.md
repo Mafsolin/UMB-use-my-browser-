@@ -12,32 +12,36 @@
 
 ## Example MCP-style actions
 
-- `umb_create_session`
-- `umb_open_tabs`
-- `umb_claim_tab`
-- `umb_new_tab`
-- `umb_goto`
-- `umb_get_url`
-- `umb_get_title`
-- `umb_dom_snapshot`
-- `umb_click`
-- `umb_fill`
-- `umb_scroll`
-- `umb_screenshot`
-- `umb_name_session`
-- `umb_finalize`
+- `create_session`
+- `open_tabs`
+- `claim_tab`
+- `new_tab`
+- `goto`
+- `get_url`
+- `get_title`
+- `dom_snapshot`
+- `click`
+- `fill`
+- `scroll`
+- `screenshot`
+- `name_session`
+- `finalize`
 
 ## Typical session flow
 
-1. `umb_create_session`
-2. `umb_open_tabs`
-3. `umb_claim_tab` for an existing tab or `umb_new_tab`
-4. `umb_goto`
-5. `umb_dom_snapshot`
-6. `umb_click` / `umb_fill` / `umb_scroll`
-7. `umb_screenshot`
-8. `umb_name_session`
-9. `umb_finalize`
+1. `create_session`
+2. `open_tabs`
+3. `claim_tab` for an existing tab or `new_tab`
+4. `goto`
+5. `dom_snapshot`
+6. `click` / `fill` / `scroll`
+7. `screenshot`
+8. `name_session`
+9. `finalize`
+
+## Browser-Only Usage
+
+For browser-required tasks, use UMB through the user's real browser only. Do not replace the live bridge with HTTP, search, static fetches, another browser, or active-tab-only tooling; report the browser-only path as blocked when UMB is unavailable.
 
 ## Live acceptance targets
 

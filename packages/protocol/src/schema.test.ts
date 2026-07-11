@@ -5,11 +5,13 @@ import {
   bridgeSessionSchema,
   clickCommandSchema,
   fillCommandSchema,
+  findControlsCommandSchema,
   finalizeCommandSchema,
   gotoCommandSchema,
   nameSessionCommandSchema,
   newTabCommandSchema,
   openTabsCommandSchema,
+  readPageCommandSchema,
   scrollCommandSchema,
   submitCommandSchema
 } from "./schema.js";
@@ -46,7 +48,16 @@ describe("universal bridge protocol", () => {
 });
 
 describe("bridge command parsing - valid payloads", () => {
-  it("accepts an empty-params newTab command", () => {
+  it("accepts a newTab command with an optional URL", () => {
+    const command = newTabCommandSchema.parse({
+      type: "newTab",
+      sessionId: validSessionId,
+      params: { url: "https://www.google.com/" }
+    });
+    expect(command.params).toEqual({ url: "https://www.google.com/" });
+  });
+
+  it("accepts a newTab command without a URL", () => {
     const command = newTabCommandSchema.parse({
       type: "newTab",
       sessionId: validSessionId,
@@ -74,6 +85,36 @@ describe("bridge command parsing - valid payloads", () => {
       tabId: "tab-42",
       url: "https://www.google.com/"
     });
+  });
+
+  it("accepts a structured readPage command with controls", () => {
+    const command = readPageCommandSchema.parse({
+      type: "readPage",
+      sessionId: validSessionId,
+      params: { tabId: "t-1", format: "text", maxChars: 500, includeMetadata: false }
+    });
+    expect(command.params).toEqual({
+      tabId: "t-1",
+      format: "text",
+      maxChars: 500,
+      includeMetadata: false
+    });
+  });
+
+  it("accepts findControls filters and applies defaults", () => {
+    const defaults = findControlsCommandSchema.parse({
+      type: "findControls",
+      sessionId: validSessionId,
+      params: { tabId: "t-1" }
+    });
+    expect(defaults.params).toEqual({ tabId: "t-1", visibleOnly: true, limit: 50 });
+
+    const filtered = findControlsCommandSchema.parse({
+      type: "findControls",
+      sessionId: validSessionId,
+      params: { tabId: "t-1", query: "save", kind: "button", visibleOnly: false, limit: 100 }
+    });
+    expect(filtered.params.kind).toBe("button");
   });
 
   it("accepts a click command with selector", () => {
@@ -173,6 +214,15 @@ describe("bridge command parsing - invalid payloads", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects a newTab command with a non-URL url", () => {
+    const result = newTabCommandSchema.safeParse({
+      type: "newTab",
+      sessionId: validSessionId,
+      params: { url: "not a url" }
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects a goto command with a non-URL url", () => {
     const result = gotoCommandSchema.safeParse({
       type: "goto",
@@ -180,6 +230,14 @@ describe("bridge command parsing - invalid payloads", () => {
       params: { tabId: "t-1", url: "not a url" }
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects findControls limits above the maximum", () => {
+    expect(findControlsCommandSchema.safeParse({
+      type: "findControls",
+      sessionId: validSessionId,
+      params: { tabId: "t-1", limit: 101 }
+    }).success).toBe(false);
   });
 
   it("rejects a click command with an empty selector", () => {

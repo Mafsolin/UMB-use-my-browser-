@@ -24,7 +24,7 @@ class FakeMcpBridge implements CommandCapableBridge {
   getSession(sessionId: string): BridgeSession {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Unknown MCP session ${sessionId}. Create it first with umb_create_session.`);
+      throw new Error(`Unknown MCP session ${sessionId}. Create it first with create_session.`);
     }
     return session;
   }
@@ -58,19 +58,85 @@ describe("UMB MCP server", () => {
     await server.close();
   });
 
-  it("registers the browser tools", async () => {
+  it("registers concise browser tool names without legacy aliases", async () => {
     const result = await client.listTools();
-    expect(result.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
-      "umb_create_session",
-      "umb_open_tabs",
-      "umb_goto",
-      "umb_finalize"
+    const names = result.tools.map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "create_session",
+      "open_tabs",
+      "goto",
+      "read_page",
+      "find_controls",
+      "finalize"
     ]));
+    expect(names.every((name) => !name.startsWith("umb_"))).toBe(true);
+    expect(names).not.toContain("dom_snapshot");
+  });
+
+  it("forwards an optional URL to new_tab", async () => {
+    await client.callTool({
+      name: "new_tab",
+      arguments: { url: "https://www.google.com/" }
+    });
+
+    expect(bridge.commands).toContainEqual({
+      type: "newTab",
+      sessionId: expect.any(String),
+      params: { url: "https://www.google.com/" }
+    });
+  });
+
+  it("forwards read_page controls through the structured bridge command", async () => {
+    await client.callTool({
+      name: "read_page",
+      arguments: { tabId: "tab-1", format: "text", maxChars: 500, includeMetadata: false }
+    });
+
+    expect(bridge.commands).toContainEqual({
+      type: "readPage",
+      sessionId: expect.any(String),
+      params: { tabId: "tab-1", format: "text", maxChars: 500, includeMetadata: false }
+    });
+  });
+
+  it("forwards find_controls filters through the structured bridge command", async () => {
+    await client.callTool({
+      name: "find_controls",
+      arguments: {
+        tabId: "tab-1",
+        query: "save",
+        kind: "button",
+        visibleOnly: false,
+        limit: 75
+      }
+    });
+
+    expect(bridge.commands).toContainEqual({
+      type: "findControls",
+      sessionId: expect.any(String),
+      params: {
+        tabId: "tab-1",
+        query: "save",
+        kind: "button",
+        visibleOnly: false,
+        limit: 75
+      }
+    });
+  });
+
+  it("uses find_controls defaults", async () => {
+    await client.callTool({ name: "find_controls", arguments: { tabId: "tab-1" } });
+
+    expect(bridge.commands).toContainEqual({
+      type: "findControls",
+      sessionId: expect.any(String),
+      params: { tabId: "tab-1", visibleOnly: true, limit: 50 }
+    });
   });
 
   it("creates a session and uses it as the current session", async () => {
     const created = await client.callTool({
-      name: "umb_create_session",
+      name: "create_session",
       arguments: { clientId: "codex", name: "Research" }
     });
     const session = JSON.parse((created as { content: Array<{ text: string }> }).content[0].text) as BridgeSession;
@@ -82,7 +148,7 @@ describe("UMB MCP server", () => {
       params: { name: "Research" }
     });
 
-    await client.callTool({ name: "umb_open_tabs", arguments: {} });
+    await client.callTool({ name: "open_tabs", arguments: {} });
     expect(bridge.commands).toContainEqual({
       type: "openTabs",
       sessionId: session.sessionId,
@@ -92,7 +158,7 @@ describe("UMB MCP server", () => {
 
   it("rejects commands for sessions not created through MCP", async () => {
     const result = await client.callTool({
-      name: "umb_get_title",
+      name: "get_title",
       arguments: {
         sessionId: "00000000-0000-4000-8000-000000000999",
         tabId: "tab-1"

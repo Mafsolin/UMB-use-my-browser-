@@ -4,6 +4,10 @@
 
 UMB is the live-browser path. Use it when correctness depends on the actual browser state.
 
+## Browser-Only Policy
+
+For browser-required work, operate only through the local UMB bridge and the user's real browser. Do not fall back to direct HTTP, search, static fetches, another browser, or active-tab-only tooling. Report the work as blocked when UMB is unavailable.
+
 ## Operating Sequence
 
 1. Create or reuse a UMB session.

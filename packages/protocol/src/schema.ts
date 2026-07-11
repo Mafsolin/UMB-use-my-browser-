@@ -7,6 +7,8 @@ export const BridgeCommandType = {
   Goto: "goto",
   GetUrl: "getUrl",
   GetTitle: "getTitle",
+  ReadPage: "readPage",
+  FindControls: "findControls",
   DomSnapshot: "domSnapshot",
   Click: "click",
   Fill: "fill",
@@ -88,9 +90,35 @@ export const keepListSchema = z.array(keepEntrySchema);
 const sessionIdField = z.string().uuid("sessionId must be a valid UUID");
 const emptyParams = z.object({}).strict();
 const tabIdParams = z.object({ tabId: tabIdSchema }).strict();
+export const readPageFormatSchema = z.enum(["markdown", "text"]);
+export const readPageMaxCharsSchema = z.number().int().min(1).max(100_000);
+export const readPageControlKindSchema = z.enum([
+  "link",
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "form",
+  "contenteditable"
+]);
+export const findControlsLimitSchema = z.number().int().min(1).max(100);
+const readPageParams = z.object({
+  tabId: tabIdSchema,
+  format: readPageFormatSchema.default("markdown"),
+  maxChars: readPageMaxCharsSchema.optional(),
+  includeMetadata: z.boolean().default(true)
+}).strict();
+const findControlsParams = z.object({
+  tabId: tabIdSchema,
+  query: z.string().min(1).max(2048).optional(),
+  kind: readPageControlKindSchema.optional(),
+  visibleOnly: z.boolean().default(true),
+  limit: findControlsLimitSchema.default(50)
+}).strict();
 const gotoParams = z
   .object({ tabId: tabIdSchema, url: navigationUrlSchema })
   .strict();
+const newTabParams = z.object({ url: navigationUrlSchema.optional() }).strict();
 const clickParams = z
   .object({ tabId: tabIdSchema, selector: selectorSchema })
   .strict();
@@ -121,7 +149,7 @@ export const claimTabCommandSchema = z.object({
 export const newTabCommandSchema = z.object({
   type: z.literal(BridgeCommandType.NewTab),
   sessionId: sessionIdField,
-  params: emptyParams
+  params: newTabParams
 }).strict();
 
 export const gotoCommandSchema = z.object({
@@ -140,6 +168,18 @@ export const getTitleCommandSchema = z.object({
   type: z.literal(BridgeCommandType.GetTitle),
   sessionId: sessionIdField,
   params: tabIdParams
+}).strict();
+
+export const readPageCommandSchema = z.object({
+  type: z.literal(BridgeCommandType.ReadPage),
+  sessionId: sessionIdField,
+  params: readPageParams
+}).strict();
+
+export const findControlsCommandSchema = z.object({
+  type: z.literal(BridgeCommandType.FindControls),
+  sessionId: sessionIdField,
+  params: findControlsParams
 }).strict();
 
 export const domSnapshotCommandSchema = z.object({
@@ -197,6 +237,8 @@ export const bridgeCommandSchema = z.discriminatedUnion("type", [
   gotoCommandSchema,
   getUrlCommandSchema,
   getTitleCommandSchema,
+  readPageCommandSchema,
+  findControlsCommandSchema,
   domSnapshotCommandSchema,
   clickCommandSchema,
   fillCommandSchema,

@@ -1,6 +1,6 @@
 ---
 name: use-my-browser
-description: Drive the user's real Chrome through the local UMB bridge when a task requires live browser state, logged-in sessions, existing tabs, JavaScript-rendered pages, background tab access, or anti-bot-resistant navigation. Prefer UMB over static fetch/search whenever the task is browser-required rather than static-capable.
+description: Drive the user's real Chrome only through the local UMB bridge when a task requires live browser state, logged-in sessions, existing tabs, JavaScript-rendered pages, background tab access, or anti-bot-resistant navigation. Browser-only policy: do not substitute HTTP, search, or another browser surface for browser-required work.
 ---
 
 # UMB (Use My Browser)
@@ -36,6 +36,10 @@ Treat a task as `static-capable` only when the answer can be retrieved reliably 
 
 If the task is `browser-required`, do not silently fall back to plain HTTP or search-only strategies.
 If the `UMB` bridge is unavailable, stop early and say that the live bridge is missing instead of pretending the task can be done through an active-tab-only workaround.
+
+## Browser-Only Policy
+
+For `browser-required` work, use only the local UMB bridge and the user's real browser. Do not replace it with direct HTTP requests, web search, static fetches, a different browser, or active-tab-only tooling. If UMB is unavailable, report that the browser-only path is blocked rather than attempting a substitute.
 
 ## UMB Workflow
 

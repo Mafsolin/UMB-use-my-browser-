@@ -37,13 +37,13 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   async function resolveSessionId(input: { sessionId?: string }) {
     const sessionId = input.sessionId ?? await ensureCurrentSessionId();
     if (!sessions.has(sessionId)) {
-      throw new Error(`Unknown MCP session ${sessionId}. Create it first with umb_create_session.`);
+      throw new Error(`Unknown MCP session ${sessionId}. Create it first with create_session.`);
     }
     return sessionId;
   }
 
   server.registerTool(
-    "umb_create_session",
+    "create_session",
     {
       description: "Create a new UMB bridge session.",
       inputSchema: {
@@ -82,7 +82,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_open_tabs",
+    "open_tabs",
     { description: "List all tabs visible to UMB.", inputSchema: {} },
     async () => {
       const sessionId = await ensureCurrentSessionId();
@@ -98,7 +98,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_claim_tab",
+    "claim_tab",
     {
       description: "Claim an existing browser tab for this UMB session.",
       inputSchema: {
@@ -120,14 +120,17 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_new_tab",
-    { description: "Create a new background tab.", inputSchema: {} },
-    async () => {
+    "new_tab",
+    {
+      description: "Create a new background tab, optionally at a URL.",
+      inputSchema: { url: z.string().url().optional() }
+    },
+    async (input) => {
       const sessionId = await ensureCurrentSessionId();
       const result = await service.executeCommand({
         type: "newTab",
         sessionId,
-        params: {}
+        params: input.url === undefined ? {} : { url: input.url }
       });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
@@ -136,7 +139,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_goto",
+    "goto",
     {
       description: "Navigate an existing UMB tab to a URL.",
       inputSchema: {
@@ -159,7 +162,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_get_url",
+    "get_url",
     {
       description: "Read the current URL from a claimed or UMB-created tab.",
       inputSchema: {
@@ -181,7 +184,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_get_title",
+    "get_title",
     {
       description: "Read the current title from a claimed or UMB-created tab.",
       inputSchema: {
@@ -203,20 +206,28 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_dom_snapshot",
+    "read_page",
     {
-      description: "Read a DOM snapshot from a tab, including non-active tabs when supported.",
+      description: "Extract redacted page content in Markdown or plain text without exposing the raw DOM.",
       inputSchema: {
         sessionId: z.string().optional(),
-        tabId: z.string()
+        tabId: z.string(),
+        format: z.enum(["markdown", "text"]).default("markdown"),
+        maxChars: z.number().int().min(1).max(100_000).optional(),
+        includeMetadata: z.boolean().default(true)
       }
     },
     async (input) => {
       const sessionId = await resolveSessionId(input);
       const result = await service.executeCommand({
-        type: "domSnapshot",
+        type: "readPage",
         sessionId,
-        params: { tabId: input.tabId }
+        params: {
+          tabId: input.tabId,
+          format: input.format,
+          ...(input.maxChars === undefined ? {} : { maxChars: input.maxChars }),
+          includeMetadata: input.includeMetadata
+        }
       });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
@@ -225,7 +236,39 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_click",
+    "find_controls",
+    {
+      description: "Search all redacted page controls by optional text and kind filters.",
+      inputSchema: {
+        sessionId: z.string().optional(),
+        tabId: z.string(),
+        query: z.string().min(1).max(2048).optional(),
+        kind: z.enum(["link", "button", "input", "textarea", "select", "form", "contenteditable"]).optional(),
+        visibleOnly: z.boolean().default(true),
+        limit: z.number().int().min(1).max(100).default(50)
+      }
+    },
+    async (input) => {
+      const sessionId = await resolveSessionId(input);
+      const result = await service.executeCommand({
+        type: "findControls",
+        sessionId,
+        params: {
+          tabId: input.tabId,
+          ...(input.query === undefined ? {} : { query: input.query }),
+          ...(input.kind === undefined ? {} : { kind: input.kind }),
+          visibleOnly: input.visibleOnly,
+          limit: input.limit
+        }
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "click",
     {
       description: "Click an element in a claimed or UMB-created tab.",
       inputSchema: {
@@ -248,7 +291,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_fill",
+    "fill",
     {
       description: "Fill an input or textarea in a claimed or UMB-created tab.",
       inputSchema: {
@@ -272,7 +315,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_submit",
+    "submit",
     {
       description:
         "Submit a form or submit button in a claimed or UMB-created tab.",
@@ -301,7 +344,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_scroll",
+    "scroll",
     {
       description: "Scroll within a claimed or UMB-created tab.",
       inputSchema: {
@@ -325,7 +368,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_screenshot",
+    "screenshot",
     {
       description: "Capture a screenshot from a tab.",
       inputSchema: {
@@ -347,7 +390,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_name_session",
+    "name_session",
     {
       description: "Attach a human-readable name to the current UMB session.",
       inputSchema: {
@@ -369,7 +412,7 @@ export function createUmbMcpServer(service: CommandCapableBridge) {
   );
 
   server.registerTool(
-    "umb_finalize",
+    "finalize",
     {
       description: "Finalize the current browser work and keep only deliverable or handoff tabs.",
       inputSchema: {

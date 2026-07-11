@@ -38,7 +38,7 @@ export class HttpBridgeService implements CommandCapableBridge {
   getSession(sessionId: string): BridgeSession {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Unknown MCP session ${sessionId}. Create it first with umb_create_session.`);
+      throw new Error(`Unknown MCP session ${sessionId}. Create it first with create_session.`);
     }
 
     return session;

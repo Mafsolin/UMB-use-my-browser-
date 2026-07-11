@@ -16,6 +16,64 @@ export type BridgeTab = {
   tabGroup?: string;
 };
 
+export type ReadPageOptions = {
+  format: "markdown" | "text";
+  maxChars?: number;
+  includeMetadata: boolean;
+};
+
+export type ReadPageMetadata = {
+  title: string;
+  byline?: string;
+  excerpt?: string;
+  siteName?: string;
+};
+
+export type ReadPageControlType =
+  | "link"
+  | "button"
+  | "input"
+  | "textarea"
+  | "select"
+  | "form"
+  | "contenteditable";
+
+export type ReadPageControl = {
+  type: ReadPageControlType;
+  selector: string;
+  label?: string;
+  href?: string;
+  visible: boolean;
+  actionable: boolean;
+};
+
+export type ReadPageResult = {
+  version: "1.0";
+  url: string;
+  content: string;
+  contentType: "text/markdown" | "text/plain";
+  truncated: boolean;
+  redacted: boolean;
+  extraction: "readability" | "fallback";
+  metadata?: ReadPageMetadata;
+  totalControls: number;
+  controlsTruncated: boolean;
+  controls: ReadPageControl[];
+};
+
+export type FindControlsOptions = {
+  query?: string;
+  kind?: ReadPageControlType;
+  visibleOnly: boolean;
+  limit: number;
+};
+
+export type FindControlsResult = {
+  totalControls: number;
+  controlsTruncated: boolean;
+  controls: ReadPageControl[];
+};
+
 export type DomSnapshotResult = {
   url?: string;
   title?: string;
@@ -73,10 +131,12 @@ export interface BrowserConnector {
   endSession?(sessionId: string): Promise<void>;
   openTabs(): Promise<BridgeTab[]>;
   claimTab(tabId: string): Promise<BridgeTab>;
-  newTab(): Promise<BridgeTab>;
+  newTab(url?: string): Promise<BridgeTab>;
   goto(tabId: string, url: string): Promise<void>;
   getUrl(tabId: string): Promise<string | undefined>;
   getTitle(tabId: string): Promise<string | undefined>;
+  readPage(tabId: string, options: ReadPageOptions): Promise<ReadPageResult>;
+  findControls(tabId: string, options: FindControlsOptions): Promise<FindControlsResult>;
   domSnapshot(tabId: string): Promise<DomSnapshotResult>;
   click(tabId: string, selector: string): Promise<void>;
   fill(tabId: string, selector: string, value: string): Promise<void>;

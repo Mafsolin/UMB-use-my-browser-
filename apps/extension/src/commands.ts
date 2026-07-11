@@ -10,7 +10,7 @@ import {
   startSession,
   tabIdFromString
 } from "./tabs.js";
-import { click, domSnapshot, fill, scroll, submit } from "./dom.js";
+import { click, domSnapshot, fill, findControls, readPage, scroll, submit } from "./dom.js";
 import { screenshot } from "./screenshots.js";
 import { finalize, type FinalizeKeepEntry } from "./permissions.js";
 import { getStatusResponse, syncSessionStatus } from "./status.js";
@@ -34,7 +34,7 @@ export async function handleRequest(message: ExtensionRequest): Promise<unknown>
         tabIdFromString(message.payload.tabId)
       );
     case "newTab":
-      return newTab(message.payload.sessionId);
+      return newTab(message.payload.sessionId, message.payload.url);
     case "goto":
       return goto(
         message.payload.sessionId,
@@ -50,6 +50,27 @@ export async function handleRequest(message: ExtensionRequest): Promise<unknown>
       return getTitle(
         message.payload.sessionId,
         tabIdFromString(message.payload.tabId)
+      );
+    case "readPage":
+      return readPage(
+        message.payload.sessionId,
+        tabIdFromString(message.payload.tabId),
+        {
+          format: message.payload.format,
+          maxChars: message.payload.maxChars,
+          includeMetadata: message.payload.includeMetadata
+        }
+      );
+    case "findControls":
+      return findControls(
+        message.payload.sessionId,
+        tabIdFromString(message.payload.tabId),
+        {
+          query: message.payload.query,
+          kind: message.payload.kind,
+          visibleOnly: message.payload.visibleOnly,
+          limit: message.payload.limit
+        }
       );
     case "domSnapshot":
       return domSnapshot(

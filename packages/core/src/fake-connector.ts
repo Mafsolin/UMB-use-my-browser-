@@ -3,6 +3,7 @@ import type {
   BridgeTab,
   DomSnapshotResult,
   FinalizeRequest,
+  ReadPageResult,
   ScrollResult
 } from "./connector.js";
 
@@ -88,12 +89,18 @@ export class FakeConnector implements BrowserConnector {
     return tab;
   }
 
-  async newTab(): Promise<BridgeTab> {
+  async newTab(url?: string): Promise<BridgeTab> {
     const id = String(this.nextId++);
+    const targetUrl = url ?? "about:blank";
     const tab: BridgeTab = {
       id,
-      title: "New Tab",
-      url: "about:blank",
+      title:
+        targetUrl === "about:blank"
+          ? "New Tab"
+          : targetUrl === "https://www.google.com/"
+            ? "Google"
+            : new URL(targetUrl).host,
+      url: targetUrl,
       active: false,
       kind: "temporary",
       tabGroup: "UMB"
@@ -119,6 +126,39 @@ export class FakeConnector implements BrowserConnector {
 
   async getTitle(tabId: string): Promise<string | undefined> {
     return this.tabs.get(tabId)?.title;
+  }
+
+  async readPage(tabId: string, options: { format: "markdown" | "text"; maxChars?: number; includeMetadata: boolean }): Promise<ReadPageResult> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) {
+      throw new Error(`Unknown tab: ${tabId}`);
+    }
+
+    const content = `${tab.title ?? "Untitled"} ${tab.url ?? ""}`.trim();
+    const limited = options.maxChars && content.length > options.maxChars
+      ? content.slice(0, options.maxChars)
+      : content;
+    return {
+      version: "1.0",
+      url: tab.url ?? "",
+      content: limited,
+      contentType: options.format === "markdown" ? "text/markdown" : "text/plain",
+      truncated: limited.length !== content.length,
+      redacted: false,
+      extraction: "fallback",
+      totalControls: 0,
+      controlsTruncated: false,
+      controls: [],
+      ...(options.includeMetadata ? { metadata: { title: tab.title ?? "" } } : {})
+    };
+  }
+
+  async findControls(tabId: string, options: { query?: string; kind?: "link" | "button" | "input" | "textarea" | "select" | "form" | "contenteditable"; visibleOnly: boolean; limit: number }): Promise<{ totalControls: number; controlsTruncated: boolean; controls: [] }> {
+    if (!this.tabs.has(tabId)) {
+      throw new Error(`Unknown tab: ${tabId}`);
+    }
+    void options;
+    return { totalControls: 0, controlsTruncated: false, controls: [] };
   }
 
   async domSnapshot(tabId: string): Promise<DomSnapshotResult> {
