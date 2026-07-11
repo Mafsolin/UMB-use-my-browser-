@@ -45,6 +45,49 @@ describe("daemon server", () => {
     expect(body.sessionId).toMatch(/[0-9a-f-]{36}/);
   });
 
+  it("rejects malformed JSON request bodies with a client error", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{"
+    });
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toMatch(/json/i);
+  });
+
+  it("rejects invalid session payloads with a client error", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        clientId: "",
+        permissions: {
+          allowNavigation: true,
+          allowTyping: true,
+          allowExternalSideEffects: false
+        }
+      })
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects invalid command payloads with a client error", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "goto",
+        sessionId: "not-a-uuid",
+        params: { tabId: "tab-1", url: "not-a-url" }
+      })
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it("reports extension connection state in health output", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/health`);
     const body = (await response.json()) as {
