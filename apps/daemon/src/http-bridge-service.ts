@@ -19,7 +19,10 @@ export class HttpBridgeService implements CommandCapableBridge {
   private readonly baseUrl: string;
   private readonly sessions = new Map<string, BridgeSession>();
 
-  constructor(baseUrl = process.env.UMB_DAEMON_HTTP_URL ?? "http://127.0.0.1:44777") {
+  constructor(
+    baseUrl = process.env.UMB_DAEMON_HTTP_URL ?? "http://127.0.0.1:44777",
+    private readonly requestTimeoutMs = 30_000
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 
@@ -74,13 +77,22 @@ export class HttpBridgeService implements CommandCapableBridge {
   }
 
   private async requestJson<T>(path: string, init: RequestInit): Promise<JsonResponse<T>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        "content-type": "application/json",
-        ...(init.headers ?? {})
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(this.requestTimeoutMs),
+        headers: {
+          "content-type": "application/json",
+          ...(init.headers ?? {})
+        }
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error(`UMB daemon request timed out after ${this.requestTimeoutMs}ms.`);
       }
-    });
+      throw error;
+    }
 
     const body = (await response.json().catch(() => ({}))) as T | { error?: string };
     if (!response.ok) {

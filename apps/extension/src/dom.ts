@@ -1,5 +1,4 @@
 import { ensureControlledTab, runDebuggerCommand } from "./debugger.js";
-import { redactSnapshot } from "./redaction.js";
 import {
   extractReadPage,
   findReadPageControls,
@@ -117,23 +116,35 @@ export async function domSnapshot(sessionId: string, tabId: number): Promise<Dom
   }>(
     sessionId,
     tabId,
-    `(() => ({
-      url: location.href,
-      title: document.title,
-      documentHtml: document.documentElement?.outerHTML ?? "",
-      text: document.body?.innerText ?? ""
-    }))()`
+    `(() => {
+      const clone = document.documentElement.cloneNode(true);
+      const maskedValues = [];
+      for (const selector of ["input[type='password']", "[autocomplete^='cc-']", "[data-sensitive]"]) {
+        clone.querySelectorAll(selector).forEach((element) => {
+          if (element instanceof HTMLInputElement) {
+            if (element.value) maskedValues.push(element.value);
+            const attributeValue = element.getAttribute("value");
+            if (attributeValue) maskedValues.push(attributeValue);
+            element.value = "[UMB REDACTED]";
+            element.setAttribute("value", "[UMB REDACTED]");
+          }
+          if (element.textContent) maskedValues.push(element.textContent);
+          element.textContent = "[UMB REDACTED]";
+        });
+      }
+      let text = document.body?.innerText ?? "";
+      for (const value of [...new Set(maskedValues)]) {
+        if (value) text = text.split(value).join("[UMB REDACTED]");
+      }
+      return {
+        url: location.href,
+        title: document.title,
+        documentHtml: clone.outerHTML,
+        text
+      };
+    })()`
   );
-  const redacted = redactSnapshot({
-    documentHtml: raw.documentHtml,
-    text: raw.text
-  });
-  return {
-    url: raw.url,
-    title: raw.title,
-    documentHtml: redacted.documentHtml,
-    text: redacted.text
-  };
+  return raw;
 }
 
 export async function click(

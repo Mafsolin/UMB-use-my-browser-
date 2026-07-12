@@ -1,8 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   generateBridgeAuth,
-  parseAllowedOrigins
+  parseAllowedOrigins,
+  startUmbDaemon
 } from "./runtime.js";
+
+const servers: ReturnType<typeof createServer>[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    servers.splice(0).map(
+      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
+    )
+  );
+});
 
 describe("generateBridgeAuth", () => {
   it("generates a random bearer token when none is provided", () => {
@@ -32,6 +44,24 @@ describe("generateBridgeAuth", () => {
   it("defaults allowed origins to a chrome-extension wildcard when omitted", () => {
     const auth = generateBridgeAuth();
     expect(auth.allowedOrigins).toEqual(["chrome-extension://*"]);
+  });
+});
+
+describe("startUmbDaemon", () => {
+  it("rejects when the port is occupied", async () => {
+    const occupyingServer = createServer();
+    servers.push(occupyingServer);
+    await new Promise<void>((resolve) => {
+      occupyingServer.listen(0, "127.0.0.1", resolve);
+    });
+    const address = occupyingServer.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the occupying server to have a TCP address.");
+    }
+
+    await expect(startUmbDaemon(address.port)).rejects.toMatchObject({
+      code: "EADDRINUSE"
+    });
   });
 });
 

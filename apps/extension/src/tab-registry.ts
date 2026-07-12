@@ -41,7 +41,6 @@ export class TabRegistry {
     this.entries.set(tabId, {
       ...existing,
       claimed: false,
-      keptStatus: undefined,
       sessionId: undefined
     });
   }

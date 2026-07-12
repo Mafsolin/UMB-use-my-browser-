@@ -1,3 +1,5 @@
+import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import type {
   BrowserConnector,
@@ -39,6 +41,43 @@ export type BridgeHandshakeResult =
 
 const BEARER_PROTOCOL_PREFIX = "bearer.";
 const DEFAULT_PROTOCOL = "umb-v1";
+const INVALID_RESPONSE_CLOSE_CODE = 1007;
+
+function parseProtocolHeader(header: string | string[] | undefined): string[] {
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  if (!raw) {
+    return [];
+  }
+
+  return raw.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function rejectUpgrade(socket: Duplex, statusCode: number, reason: string): void {
+  const statusText = statusCode === 404 ? "Not Found" : "Forbidden";
+  const body = `${reason}\n`;
+  socket.write(
+    `HTTP/1.1 ${statusCode} ${statusText}\r\n` +
+      "Connection: close\r\n" +
+      "Content-Type: text/plain; charset=utf-8\r\n" +
+      `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+      "\r\n" +
+      body
+  );
+  socket.destroy();
+}
+
+function isBridgeResponse(value: unknown): value is BridgeResponse {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.ok === "boolean" &&
+    (candidate.error === undefined || typeof candidate.error === "string")
+  );
+}
 
 export function verifyBridgeHandshake(input: {
   origin: string | undefined;
@@ -75,11 +114,11 @@ export function verifyBridgeHandshake(input: {
     };
   }
 
-  const chosenProtocol =
-    protocolList.find(
-      (entry) => typeof entry === "string" && !entry.startsWith(BEARER_PROTOCOL_PREFIX)
-    ) ?? DEFAULT_PROTOCOL;
-  return { ok: true, protocol: chosenProtocol };
+  if (!protocolList.includes(DEFAULT_PROTOCOL)) {
+    return { ok: false, reason: `Missing required ${DEFAULT_PROTOCOL} WebSocket subprotocol.` };
+  }
+
+  return { ok: true, protocol: DEFAULT_PROTOCOL };
 }
 
 function matchesOriginPattern(origin: string, pattern: string): boolean {
@@ -187,31 +226,53 @@ export class ExtensionConnector implements BrowserConnector {
 
   attachToServer(server: import("node:http").Server, path = "/extension"): WebSocketServer {
     const wsServer = new WebSocketServer({
-      server,
-      path,
-      handleProtocols: (protocols, request) => {
-        const result = verifyBridgeHandshake({
-          origin: request.headers.origin,
-          protocols,
-          expectedToken: this.auth.bearerToken,
-          allowedOrigins: this.auth.allowedOrigins
-        });
-        if (!result.ok) {
-          console.warn(`UMB bridge handshake rejected: ${result.reason}`);
-          return false;
-        }
-        return result.protocol;
-      }
+      noServer: true,
+      handleProtocols: (protocols) =>
+        protocols.has(DEFAULT_PROTOCOL) ? DEFAULT_PROTOCOL : false
     });
+
+    server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+      const requestPath = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+      if (requestPath !== path) {
+        rejectUpgrade(socket, 404, "Unknown WebSocket endpoint.");
+        return;
+      }
+
+      const result = verifyBridgeHandshake({
+        origin: request.headers.origin,
+        protocols: parseProtocolHeader(request.headers["sec-websocket-protocol"]),
+        expectedToken: this.auth.bearerToken,
+        allowedOrigins: this.auth.allowedOrigins
+      });
+      if (!result.ok) {
+        console.warn(`UMB bridge handshake rejected: ${result.reason}`);
+        rejectUpgrade(socket, 403, result.reason);
+        return;
+      }
+
+      wsServer.handleUpgrade(request, socket, head, (acceptedSocket) => {
+        wsServer.emit("connection", acceptedSocket, request);
+      });
+    });
+
     wsServer.on("connection", (socket: WebSocket) => {
+      const previousSocket = this.socket;
       this.failAllPending(new Error("UMB extension reconnected before pending requests completed."));
       this.socket = socket;
       this.lastConnectedAt = new Date().toISOString();
-      socket.on("message", (raw: import("ws").RawData) => this.handleMessage(String(raw)));
-      socket.on("close", () => {
+
+      socket.on("message", (raw: import("ws").RawData) => {
         if (this.socket === socket) {
-          this.socket = undefined;
+          this.handleMessage(socket, String(raw));
         }
+      });
+      socket.on("error", () => undefined);
+      socket.on("close", () => {
+        if (this.socket !== socket) {
+          return;
+        }
+
+        this.socket = undefined;
         this.sessionStatus = {
           sessionActive: false,
           sessionId: undefined,
@@ -222,6 +283,15 @@ export class ExtensionConnector implements BrowserConnector {
         this.currentSessionId = undefined;
         this.failAllPending(new Error("UMB extension disconnected from the daemon."));
       });
+
+      if (
+        previousSocket &&
+        previousSocket !== socket &&
+        previousSocket.readyState !== previousSocket.CLOSING &&
+        previousSocket.readyState !== previousSocket.CLOSED
+      ) {
+        previousSocket.close(1000, "Replaced by a newer extension connection.");
+      }
     });
     return wsServer;
   }
@@ -389,8 +459,20 @@ export class ExtensionConnector implements BrowserConnector {
     });
   }
 
-  private handleMessage(raw: string): void {
-    const parsed = JSON.parse(raw) as BridgeResponse;
+  private handleMessage(socket: WebSocket, raw: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      socket.close(INVALID_RESPONSE_CLOSE_CODE, "Invalid JSON response.");
+      return;
+    }
+
+    if (!isBridgeResponse(parsed)) {
+      socket.close(INVALID_RESPONSE_CLOSE_CODE, "Invalid bridge response.");
+      return;
+    }
+
     if (parsed.id === "hello" && parsed.ok) {
       this.captureStatus(parsed.result);
       return;

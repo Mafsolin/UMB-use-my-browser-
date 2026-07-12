@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { bridgeCommandSchema } from "@umb/protocol";
 import { FakeConnector } from "@umb/core";
 import { AuditLogger } from "./audit-log.js";
@@ -334,6 +334,105 @@ describe("BridgeService", () => {
         params: { tabId: tab.id, url: "https://www.google.com/" }
       })
     ).rejects.toThrow(/already finalized/i);
+  });
+
+  it("serializes parallel commands so connector session context cannot leak", async () => {
+    const connector = new FakeConnector();
+    const calls: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      connector.beginSession = async (session) => {
+        calls.push(`begin:${session.clientId}`);
+        if (session.clientId === "session-a") {
+          resolve();
+          await new Promise<void>((release) => {
+            releaseFirst = release;
+          });
+        }
+      };
+    });
+    connector.openTabs = async () => {
+      calls.push("openTabs");
+      return [];
+    };
+
+    const service = new BridgeService(connector);
+    const sessionA = service.createSession({
+      clientId: "session-a",
+      permissions: { allowNavigation: true, allowTyping: true, allowExternalSideEffects: true }
+    });
+    const sessionB = service.createSession({
+      clientId: "session-b",
+      permissions: { allowNavigation: true, allowTyping: true, allowExternalSideEffects: true }
+    });
+    const commandA = service.executeCommand({
+      type: "newTab",
+      sessionId: sessionA.sessionId,
+      params: {}
+    });
+    await firstStarted;
+    const commandB = service.executeCommand({
+      type: "newTab",
+      sessionId: sessionB.sessionId,
+      params: {}
+    });
+
+    await Promise.resolve();
+    expect(calls.filter((entry) => entry.startsWith("begin:"))).toEqual(["begin:session-a"]);
+    releaseFirst?.();
+    await Promise.all([commandA, commandB]);
+    expect(calls.filter((entry) => entry.startsWith("begin:"))).toEqual([
+      "begin:session-a",
+      "begin:session-b"
+    ]);
+  });
+
+  it("keeps a successful browser result when audit storage is unavailable", async () => {
+    const auditLogger = new AuditLogger("unused");
+    auditLogger.write = async () => {
+      throw new Error("disk full");
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const service = new BridgeService(new FakeConnector(), auditLogger);
+    const session = service.createSession({
+      clientId: "audit-failure",
+      permissions: {
+        allowNavigation: true,
+        allowTyping: true,
+        allowExternalSideEffects: true
+      }
+    });
+
+    await expect(service.executeCommand({
+      type: "newTab",
+      sessionId: session.sessionId,
+      params: {}
+    })).resolves.toMatchObject({ id: "1" });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/audit log write failed/i),
+      expect.any(Error)
+    );
+  });
+
+  it("rejects finalize keep entries that are not owned by the session", async () => {
+    const connector = new FakeConnector();
+    const finalize = vi.spyOn(connector, "finalize");
+    const service = new BridgeService(connector);
+    const session = service.createSession({
+      clientId: "invalid-keep",
+      permissions: {
+        allowNavigation: true,
+        allowTyping: true,
+        allowExternalSideEffects: true
+      }
+    });
+
+    await expect(service.executeCommand({
+      type: "finalize",
+      sessionId: session.sessionId,
+      params: { keep: [{ id: "999", status: "deliverable" }] }
+    })).rejects.toThrow(/not owned by this session/i);
+    expect(finalize).not.toHaveBeenCalled();
   });
 
   it("rejects raw payloads whose tabId is not a string before reaching the router", async () => {

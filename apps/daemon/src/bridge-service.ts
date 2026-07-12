@@ -30,6 +30,7 @@ export class BridgeService {
   private readonly tabRegistry = new TabSessionRegistry();
   private activeSessionId?: string;
   private readonly finalizedSessionIds = new Set<string>();
+  private commandQueue: Promise<void> = Promise.resolve();
 
   constructor(
     connector: BrowserConnector = new FakeConnector(),
@@ -46,11 +47,6 @@ export class BridgeService {
   }): BridgeSession {
     const session = this.sessionManager.createSession(input);
     this.finalizedSessionIds.delete(session.sessionId);
-    void this.connector.beginSession?.({
-      sessionId: session.sessionId,
-      clientId: session.clientId,
-      name: session.name
-    }).catch(() => undefined);
     return session;
   }
 
@@ -94,6 +90,12 @@ export class BridgeService {
   }
 
   async executeCommand(command: BridgeCommand): Promise<unknown> {
+    const execution = this.commandQueue.then(() => this.executeCommandNow(command));
+    this.commandQueue = execution.then(() => undefined, () => undefined);
+    return execution;
+  }
+
+  private async executeCommandNow(command: BridgeCommand): Promise<unknown> {
     const session = this.sessionManager.getSession(command.sessionId);
 
     try {
@@ -158,10 +160,21 @@ export class BridgeService {
       }
 
       if (command.type === "finalize") {
+        const ownedTabIds = this.tabRegistry.get(command.sessionId);
+        const ownedTabIdSet = new Set(ownedTabIds);
+        const invalidKeepEntry = command.params.keep.find(
+          (entry) => !ownedTabIdSet.has(entry.id)
+        );
+        if (invalidKeepEntry) {
+          throw new Error(
+            `Tab ${invalidKeepEntry.id} is not owned by this session and cannot be kept during finalize.`
+          );
+        }
+
         const result = await this.connector.finalize({
           sessionId: command.sessionId,
           keep: command.params.keep,
-          ownedTabIds: this.tabRegistry.get(command.sessionId)
+          ownedTabIds
         });
         this.tabRegistry.replace(
           command.sessionId,
@@ -227,16 +240,23 @@ export class BridgeService {
     tabId = this.getTabId(command),
     message?: string
   ): Promise<void> {
-    await this.auditLogger.write({
-      timestamp: new Date().toISOString(),
-      sessionId: session.sessionId,
-      clientId: session.clientId,
-      sessionName: session.name,
-      commandType: command.type,
-      tabId,
-      origin: this.extractOrigin(command),
-      result,
-      message
-    });
+    try {
+      await this.auditLogger.write({
+        timestamp: new Date().toISOString(),
+        sessionId: session.sessionId,
+        clientId: session.clientId,
+        sessionName: session.name,
+        commandType: command.type,
+        tabId,
+        origin: this.extractOrigin(command),
+        result,
+        message
+      });
+    } catch (error) {
+      console.warn(
+        `UMB audit log write failed for ${command.type} in session ${session.sessionId}.`,
+        error
+      );
+    }
   }
 }

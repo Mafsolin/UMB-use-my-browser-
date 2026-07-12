@@ -84,13 +84,39 @@ export function resolveBootstrapAllowedOrigins(
   return [originForExtensionId(extensionId)];
 }
 
+const MAX_JSON_BODY_BYTES = 256 * 1024;
+
+class RequestBodyTooLargeError extends Error {}
+
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.on("data", (chunk) => {
+    let receivedBytes = 0;
+    let settled = false;
+
+    const contentLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BODY_BYTES) {
+      reject(new RequestBodyTooLargeError("Request body is too large."));
+      req.resume();
+      return;
+    }
+
+    req.on("data", (chunk: Buffer | string) => {
+      if (settled) {
+        return;
+      }
+      receivedBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      if (receivedBytes > MAX_JSON_BODY_BYTES) {
+        settled = true;
+        reject(new RequestBodyTooLargeError("Request body is too large."));
+        return;
+      }
       raw += chunk;
     });
     req.on("end", () => {
+      if (settled) {
+        return;
+      }
       try {
         resolve(raw.length > 0 ? JSON.parse(raw) : {});
       } catch (error) {
@@ -183,7 +209,11 @@ export function createServer(
       res.writeHead(404);
       res.end();
     } catch (error) {
-      const status = error instanceof SyntaxError || error instanceof ZodError ? 400 : 500;
+      const status = error instanceof RequestBodyTooLargeError
+        ? 413
+        : error instanceof SyntaxError || error instanceof ZodError
+          ? 400
+          : 500;
       res.writeHead(status, jsonHeaders);
       res.end(
         JSON.stringify({

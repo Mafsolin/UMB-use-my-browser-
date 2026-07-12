@@ -121,7 +121,7 @@ export async function addTabToUmbGroup(
 export async function cleanupStaleTemporaryTabs(): Promise<void> {
   const staleEntries = extensionState.registry
     .values()
-    .filter((entry) => entry.createdByUmb && !entry.sessionId);
+    .filter((entry) => entry.createdByUmb && !entry.sessionId && !entry.keptStatus);
   for (const entry of staleEntries) {
     await detachDebuggerNow(entry.tabId);
     const liveTab = await getTabIfExists(entry.tabId);
@@ -147,8 +147,9 @@ export function isUmbResidueTab(tab: chrome.tabs.Tab, tabGroup?: string): boolea
   return (
     (tab.url === "chrome://newtab/" || tab.url === "about:blank") &&
     tabGroup === TAB_GROUP_TITLE &&
-    !entry?.sessionId &&
-    !entry?.keptStatus
+    entry?.createdByUmb === true &&
+    !entry.sessionId &&
+    !entry.keptStatus
   );
 }
 
@@ -207,7 +208,8 @@ export async function probeTabState(sessionId: string, tabId: number) {
 export async function waitForUsableNavigation(
   sessionId: string,
   tabId: number,
-  requestedUrl: string
+  requestedUrl: string,
+  initialUrl?: string
 ): Promise<void> {
   const startedAt = Date.now();
   let sawCommittedUrl = false;
@@ -220,11 +222,11 @@ export async function waitForUsableNavigation(
     }
 
     const state = await probeTabState(sessionId, tabId);
-    if (isCommittedNavigation(state, requestedUrl)) {
+    if (isCommittedNavigation(state, requestedUrl, initialUrl)) {
       sawCommittedUrl = true;
     }
 
-    if (sawCommittedUrl && isUsableNavigationState(state, requestedUrl)) {
+    if (sawCommittedUrl && isUsableNavigationState(state, requestedUrl, initialUrl)) {
       return;
     }
 
@@ -279,6 +281,18 @@ export async function openTabs(): Promise<SimplifiedTab[]> {
 
 export async function claimTab(sessionId: string, tabId: number): Promise<SimplifiedTab> {
   getSessionOrThrow(sessionId);
+  const registryOwner = extensionState.registry.get(tabId)?.sessionId;
+  const liveOwner = [...extensionState.sessions.values()].find(
+    (session) =>
+      session.sessionId !== sessionId &&
+      (session.tabIds.has(tabId) || registryOwner === session.sessionId)
+  );
+  if (liveOwner) {
+    throw new Error(
+      `Tab ${tabId} is already controlled by UMB session ${liveOwner.sessionId}.`
+    );
+  }
+
   const tab = await getTabIfExists(tabId);
   if (!tab) {
     purgeTrackedTab(tabId);
@@ -319,34 +333,38 @@ export async function newTab(sessionId: string, url?: string): Promise<Simplifie
   await cleanupStaleTemporaryTabs();
 
   const createdTab = await chrome.tabs.create({ active: false, url: url ?? "about:blank" });
-  if (createdTab.id == null || createdTab.windowId == null) {
-    throw new Error("Chrome did not return a tab id.");
-  }
-
-  const tabGroup = await addTabToUmbGroup(createdTab.id, createdTab.windowId);
-  const canonicalTab = await getTabIfExists(createdTab.id);
-  if (!canonicalTab?.id) {
-    purgeTrackedTab(createdTab.id);
-    throw new Error(`New UMB tab ${createdTab.id} disappeared before it became stable.`);
-  }
-
-  recordTabForSession(sessionId, canonicalTab.id);
-  extensionState.registry.markCreated(canonicalTab.id, sessionId, tabGroup);
+  const createdTabId = createdTab.id;
   try {
+    if (createdTabId == null || createdTab.windowId == null) {
+      throw new Error("Chrome did not return a tab id.");
+    }
+
+    const tabGroup = await addTabToUmbGroup(createdTabId, createdTab.windowId);
+    const canonicalTab = await getTabIfExists(createdTabId);
+    if (canonicalTab?.id == null) {
+      throw new Error(`New UMB tab ${createdTabId} disappeared before it became stable.`);
+    }
+
+    extensionState.registry.markCreated(canonicalTab.id, sessionId, tabGroup);
+    recordTabForSession(sessionId, canonicalTab.id);
     await attachDebugger(canonicalTab.id);
     if (url) {
-      await waitForUsableNavigation(sessionId, canonicalTab.id, url);
+      await waitForUsableNavigation(sessionId, canonicalTab.id, url, "about:blank");
     }
+    return await simplifyTab(canonicalTab);
   } catch (error) {
-    getSessionOrThrow(sessionId).tabIds.delete(canonicalTab.id);
-    extensionState.registry.delete(canonicalTab.id);
+    if (createdTabId != null) {
+      await forceDetachDebugger(createdTabId).catch(() => undefined);
+      await chrome.tabs.remove(createdTabId).catch(() => undefined);
+      purgeTrackedTab(createdTabId);
+    }
     throw error;
   }
-  return simplifyTab(canonicalTab);
 }
 
 export async function goto(sessionId: string, tabId: number, url: string): Promise<void> {
   await ensureControlledTab(sessionId, tabId);
+  const initialUrl = (await getTabIfExists(tabId))?.url;
   const result = await runDebuggerCommand<{ errorText?: string }>(
     tabId,
     "Page.navigate",
@@ -356,7 +374,7 @@ export async function goto(sessionId: string, tabId: number, url: string): Promi
   if (result?.errorText) {
     throw new Error(`Browser blocked navigation to ${url} on tab ${tabId}: ${result.errorText}`);
   }
-  await waitForUsableNavigation(sessionId, tabId, url);
+  await waitForUsableNavigation(sessionId, tabId, url, initialUrl);
 }
 
 export async function getUrl(sessionId: string, tabId: number): Promise<string | undefined> {

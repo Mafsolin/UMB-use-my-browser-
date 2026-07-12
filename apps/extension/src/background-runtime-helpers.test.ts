@@ -54,6 +54,27 @@ describe("background runtime helpers", () => {
     ).toBe(true);
   });
 
+  it("does not treat the previously loaded page as a committed navigation", () => {
+    expect(
+      isCommittedNavigation(
+        {
+          href: "https://old.example/",
+          readyState: "complete",
+          documentHtml: "<html><body>old page</body></html>"
+        },
+        "https://new.example/",
+        "https://old.example/"
+      )
+    ).toBe(false);
+    expect(
+      isCommittedNavigation(
+        { href: "https://redirect.example/final" },
+        "https://new.example/",
+        "https://old.example/"
+      )
+    ).toBe(true);
+  });
+
   it("collects finalize ids from all runtime sources without duplicates", () => {
     expect(
       collectFinalizeTabIds({

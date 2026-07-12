@@ -30,11 +30,12 @@ describe("HttpBridgeService", () => {
     })).resolves.toEqual(session);
 
     expect(service.getSession(session.sessionId)).toEqual(session);
-    expect(fetchMock).toHaveBeenCalledWith("http://daemon.test/sessions", {
+    expect(fetchMock).toHaveBeenCalledWith("http://daemon.test/sessions", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ clientId: "mcp", permissions: session.permissions }),
-      headers: { "content-type": "application/json" }
-    });
+      headers: { "content-type": "application/json" },
+      signal: expect.any(AbortSignal)
+    }));
   });
 
   it("uses the daemon error message for unsuccessful responses", async () => {
@@ -48,6 +49,24 @@ describe("HttpBridgeService", () => {
       sessionId: session.sessionId,
       params: {}
     })).rejects.toThrow("Unknown session");
+  });
+
+  it("times out daemon requests that do not complete", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new HttpBridgeService("http://daemon.test", 25);
+
+    const request = service.createSession({
+      clientId: "mcp",
+      permissions: session.permissions
+    });
+    const expectation = expect(request).rejects.toThrow(/timed out/i);
+    await vi.advanceTimersByTimeAsync(25);
+    await expectation;
+    vi.useRealTimers();
   });
 
   it("updates the cached session after naming it", async () => {

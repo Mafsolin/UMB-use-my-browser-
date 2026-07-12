@@ -119,21 +119,27 @@ export async function finalize(
       claimed: true
     };
     await forceDetachDebugger(entry.tabId);
-    session.tabIds.delete(entry.tabId);
     const liveTab = await getTabIfExists(entry.tabId);
 
     if (keepIds.has(entry.tabId)) {
+      session.tabIds.delete(entry.tabId);
       extensionState.registry.markDetached(entry.tabId);
       continue;
     }
     if (entry.createdByUmb) {
       if (liveTab) {
-        await chrome.tabs.remove(entry.tabId).catch(() => undefined);
+        await chrome.tabs.remove(entry.tabId);
+        const remainingTab = await getTabIfExists(entry.tabId);
+        if (remainingTab) {
+          throw new Error(`Chrome did not close UMB tab ${entry.tabId}.`);
+        }
       }
+      session.tabIds.delete(entry.tabId);
       closed.push(String(entry.tabId));
       extensionState.registry.delete(entry.tabId);
       continue;
     }
+    session.tabIds.delete(entry.tabId);
     if (!liveTab) {
       extensionState.registry.delete(entry.tabId);
       continue;

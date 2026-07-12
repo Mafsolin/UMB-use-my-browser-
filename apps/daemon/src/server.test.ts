@@ -57,6 +57,23 @@ describe("daemon server", () => {
     expect(body.error).toMatch(/json/i);
   });
 
+  it("rejects oversized JSON request bodies", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        clientId: "x".repeat(256 * 1024),
+        permissions: {
+          allowNavigation: true,
+          allowTyping: true,
+          allowExternalSideEffects: false
+        }
+      })
+    });
+
+    expect(response.status).toBe(413);
+  });
+
   it("rejects invalid session payloads with a client error", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/sessions`, {
       method: "POST",

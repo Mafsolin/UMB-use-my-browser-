@@ -61,4 +61,7 @@ if ($restartedHealth) {
   exit 0
 }
 
+$env:UMB_DAEMON_PORT = $Port
+$env:UMB_DAEMON_HTTP_URL = "http://127.0.0.1:$Port"
+$env:UMB_DAEMON_WS_URL = "ws://127.0.0.1:$Port/extension"
 node .\apps\daemon\dist\runtime.js

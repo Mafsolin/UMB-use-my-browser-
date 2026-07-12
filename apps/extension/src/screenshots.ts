@@ -1,5 +1,7 @@
 import { ensureControlledTab, runDebuggerCommand } from "./debugger.js";
-import { redactionCss, REDACTION_STYLE_ID } from "./redaction.js";
+import { redactionCss } from "./redaction.js";
+
+const REDACTION_STYLE_MARKER = "data-umb-redaction-style";
 
 export async function screenshot(sessionId: string, tabId: number): Promise<string> {
   await ensureControlledTab(sessionId, tabId);
@@ -21,12 +23,11 @@ async function applyScreenshotMasking(tabId: number): Promise<void> {
   const css = redactionCss();
   const escaped = css.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
   const expression = `(() => {
-    const existing = document.getElementById(${JSON.stringify(REDACTION_STYLE_ID)});
-    if (existing) {
-      existing.parentNode?.removeChild(existing);
-    }
+    document.querySelectorAll('style[${REDACTION_STYLE_MARKER}]').forEach((element) => {
+      element.parentNode?.removeChild(element);
+    });
     const style = document.createElement('style');
-    style.id = ${JSON.stringify(REDACTION_STYLE_ID)};
+    style.setAttribute(${JSON.stringify(REDACTION_STYLE_MARKER)}, 'true');
     style.textContent = '${escaped}';
     (document.head || document.documentElement).appendChild(style);
     return true;
@@ -41,10 +42,9 @@ async function applyScreenshotMasking(tabId: number): Promise<void> {
 
 async function removeScreenshotMasking(tabId: number): Promise<void> {
   const expression = `(() => {
-    const existing = document.getElementById(${JSON.stringify(REDACTION_STYLE_ID)});
-    if (existing) {
-      existing.parentNode?.removeChild(existing);
-    }
+    document.querySelectorAll('style[${REDACTION_STYLE_MARKER}]').forEach((element) => {
+      element.parentNode?.removeChild(element);
+    });
     return true;
   })()`;
   await runDebuggerCommand(

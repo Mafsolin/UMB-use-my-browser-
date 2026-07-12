@@ -12,7 +12,8 @@ export function isBootstrapUrl(url: string | undefined): boolean {
 
 export function isCommittedNavigation(
   state: NavigationProbeState,
-  requestedUrl: string
+  requestedUrl: string,
+  previousUrl?: string
 ): boolean {
   const currentUrl = state.href ?? state.url;
   if (!currentUrl) {
@@ -21,6 +22,10 @@ export function isCommittedNavigation(
 
   if (currentUrl === requestedUrl) {
     return true;
+  }
+
+  if (previousUrl && currentUrl === previousUrl && requestedUrl !== previousUrl) {
+    return false;
   }
 
   if (requestedUrl.startsWith("data:") || requestedUrl.startsWith("blob:")) {
@@ -32,7 +37,8 @@ export function isCommittedNavigation(
 
 export function isUsableNavigationState(
   state: NavigationProbeState,
-  requestedUrl: string
+  requestedUrl: string,
+  previousUrl?: string
 ): boolean {
   const domReady =
     state.readyState === "interactive" || state.readyState === "complete";
@@ -42,7 +48,7 @@ export function isUsableNavigationState(
       (state.documentHtml && state.documentHtml.length > 0)
   );
 
-  if (!isCommittedNavigation(state, requestedUrl)) {
+  if (!isCommittedNavigation(state, requestedUrl, previousUrl)) {
     return false;
   }
 

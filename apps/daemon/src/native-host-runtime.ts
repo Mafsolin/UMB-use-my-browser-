@@ -18,6 +18,19 @@ type AuthBootstrap = {
   allowedOrigins: string[];
 };
 
+type DaemonHealth = {
+  daemon?: {
+    pid?: number;
+    startedAt?: string;
+  };
+};
+
+type NativeHostRuntimeDependencies = {
+  ensureDaemonRunning: () => Promise<void>;
+  fetchAuthBootstrap: (extensionId: string | undefined) => Promise<AuthBootstrap | null>;
+  fetchDaemonHealth: () => Promise<DaemonHealth | null>;
+};
+
 type NativeHostResponse = {
   ok: boolean;
   bearerToken?: string;
@@ -101,26 +114,28 @@ async function ensureDaemonRunning(): Promise<void> {
   throw new Error(`UMB daemon did not become healthy at ${DAEMON_HTTP_URL}.`);
 }
 
-async function handleRequest(request: NativeHostRequest): Promise<NativeHostResponse> {
-  const daemonHealth = await (async () => {
-    try {
-      const response = await fetch(`${DAEMON_HTTP_URL}/health`);
-      if (!response.ok) {
-        return null;
-      }
-
-      return (await response.json()) as {
-        daemon?: {
-          pid?: number;
-          startedAt?: string;
-        };
-      };
-    } catch {
+async function fetchDaemonHealth(): Promise<DaemonHealth | null> {
+  try {
+    const response = await fetch(`${DAEMON_HTTP_URL}/health`);
+    if (!response.ok) {
       return null;
     }
-  })();
+    return await response.json() as DaemonHealth;
+  } catch {
+    return null;
+  }
+}
 
-  let auth = await fetchAuthBootstrap(request.extensionId);
+export async function handleRequest(
+  request: NativeHostRequest,
+  dependencies: NativeHostRuntimeDependencies = {
+    ensureDaemonRunning,
+    fetchAuthBootstrap,
+    fetchDaemonHealth
+  }
+): Promise<NativeHostResponse> {
+  const daemonHealth = await dependencies.fetchDaemonHealth();
+  let auth = await dependencies.fetchAuthBootstrap(request.extensionId);
 
   const baseResponse = {
     daemonHttpUrl: DAEMON_HTTP_URL,
@@ -141,19 +156,17 @@ async function handleRequest(request: NativeHostRequest): Promise<NativeHostResp
       };
     case "getDaemonInfo":
     case undefined: {
-      await ensureDaemonRunning();
-      auth = await fetchAuthBootstrap(request.extensionId);
-      const refreshedHealth = await fetch(`${DAEMON_HTTP_URL}/health`).then((response) =>
-        response.json()
-      ) as {
-        daemon?: {
-          pid?: number;
-          startedAt?: string;
-        };
-      };
+      await dependencies.ensureDaemonRunning();
+      auth = await dependencies.fetchAuthBootstrap(request.extensionId);
+      if (!auth) {
+        throw new Error("UMB daemon auth bootstrap did not return credentials.");
+      }
+      const refreshedHealth = await dependencies.fetchDaemonHealth();
       return {
         ok: true,
         ...baseResponse,
+        bearerToken: auth.token,
+        allowedOrigins: auth.allowedOrigins,
         daemonPid: refreshedHealth?.daemon?.pid,
         daemonStartedAt: refreshedHealth?.daemon?.startedAt
       };
