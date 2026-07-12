@@ -49,11 +49,18 @@ node .\scripts\check-native-host-manifest.js
 
 If automatic extension detection is unavailable, set `UMB_EXTENSION_ID` to the ID shown on the extension manager page and rerun the installer.
 
-### 4. Start and verify the daemon
+### 4. Verify the daemon and extension
+
+The native host and canonical MCP command automatically start a detached daemon when no healthy daemon is available. Normally, no separate daemon command is required. After opening your MCP client or reloading the extension, verify it with:
+
+```powershell
+Invoke-RestMethod -Uri 'http://127.0.0.1:44777/health'
+```
+
+For setup diagnostics, foreground logs, or an explicit restart, use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start-daemon.ps1
-Invoke-RestMethod -Uri 'http://127.0.0.1:44777/health'
 ```
 
 The health response should report `ok: true` and `extension.connected: true`. You can test browser interaction at:
@@ -62,7 +69,7 @@ The health response should report `ok: true` and `extension.connected: true`. Yo
 http://127.0.0.1:44777/umb-test-page
 ```
 
-The native host can wake the daemon automatically after installation. The explicit start command remains useful for setup and troubleshooting.
+The native host and MCP entrypoint share the same health-check-and-start lifecycle. Concurrent startup attempts are coalesced within a process, an existing healthy daemon is always reused, and startup diagnostics go to stderr so MCP stdout remains protocol-only.
 
 ### 5. Add UMB to an MCP client
 

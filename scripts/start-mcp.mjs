@@ -18,6 +18,11 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
+const { ensureDaemonRunning } = await import(
+  pathToFileURL(path.join(rootDir, "apps/daemon/dist/daemon-lifecycle.js")).href
+);
+await ensureDaemonRunning();
+
 const [{ HttpBridgeService }, { startUmbMcp }] = await Promise.all([
   import(pathToFileURL(path.join(rootDir, "apps/daemon/dist/http-bridge-service.js")).href),
   import(pathToFileURL(path.join(rootDir, "apps/daemon/dist/mcp.js")).href)
@@ -26,4 +31,5 @@ const [{ HttpBridgeService }, { startUmbMcp }] = await Promise.all([
 const server = await startUmbMcp(new HttpBridgeService());
 globalThis.__umbMcpServer = server;
 
-await new Promise(() => {});
+// Keep the stdio runtime alive even before the transport owns another active handle.
+setInterval(() => {}, 60_000);

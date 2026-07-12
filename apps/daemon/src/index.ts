@@ -3,6 +3,7 @@ export * from "./audit-log.js";
 export * from "./command-router.js";
 export * from "./extension-connector.js";
 export * from "./mcp.js";
+export * from "./daemon-lifecycle.js";
 export * from "./native-host-runtime.js";
 export * from "./routes.js";
 export * from "./server.js";

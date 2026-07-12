@@ -1,8 +1,10 @@
+import { ensureDaemonRunning } from "./daemon-lifecycle.js";
 import { HttpBridgeService } from "./http-bridge-service.js";
 import { startUmbMcp } from "./mcp.js";
 import { pathToFileURL } from "node:url";
 
 async function main() {
+  await ensureDaemonRunning();
   await startUmbMcp(new HttpBridgeService());
 }
 

@@ -74,7 +74,11 @@ node .\scripts\install-native-host.mjs
 
 The native-host installer and registry setup are currently Windows-oriented. Other operating systems require manual native messaging registration and are not part of the supported installer path.
 
-## 4. Start the daemon
+## 4. Daemon auto-start and manual operation
+
+The canonical MCP entrypoint and the installed native host automatically reuse a healthy daemon or start a detached one and wait for its health endpoint. A separate daemon startup step is not required for normal use.
+
+To run it explicitly for foreground logs or troubleshooting:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start-daemon.ps1
@@ -152,7 +156,7 @@ Generic configuration:
 }
 ```
 
-Some clients use a different top-level key or command registration UI. Preserve the command and absolute script path; adapt only the client-specific wrapper.
+Some clients use a different top-level key or command registration UI. Preserve the command and absolute script path; adapt only the client-specific wrapper. On launch, this command builds the daemon package, auto-starts the daemon if needed, and then opens MCP stdio. Build and lifecycle diagnostics use stderr; stdout is reserved for MCP protocol messages.
 
 Operator helpers are also available:
 

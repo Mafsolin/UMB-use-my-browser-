@@ -1,11 +1,10 @@
-import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { ensureDaemonRunning, resolveDaemonEndpoints } from "./daemon-lifecycle.js";
 
-const DAEMON_HTTP_URL = process.env.UMB_DAEMON_HTTP_URL ?? "http://127.0.0.1:44777";
-const DAEMON_WS_URL = process.env.UMB_DAEMON_WS_URL ?? "ws://127.0.0.1:44777/extension";
+const DAEMON_ENDPOINTS = resolveDaemonEndpoints();
+const DAEMON_HTTP_URL = DAEMON_ENDPOINTS.httpUrl;
+const DAEMON_WS_URL = DAEMON_ENDPOINTS.wsUrl;
 const HOST_NAME = "com.umb.use_my_browser";
 
 type NativeHostRequest = {
@@ -44,15 +43,6 @@ type NativeHostResponse = {
   error?: string;
 };
 
-async function daemonHealthy(): Promise<boolean> {
-  try {
-    const response = await fetch(`${DAEMON_HTTP_URL}/health`);
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 export function buildAuthBootstrapUrl(extensionId: string | undefined): string {
   const url = new URL(`${DAEMON_HTTP_URL}/internal/auth-bootstrap`);
   if (extensionId) {
@@ -86,32 +76,6 @@ async function fetchAuthBootstrap(extensionId: string | undefined): Promise<Auth
   } catch {
     return null;
   }
-}
-
-async function ensureDaemonRunning(): Promise<void> {
-  if (await daemonHealthy()) {
-    return;
-  }
-
-  const runtimePath = path.resolve(import.meta.dirname, "runtime.js");
-  await access(runtimePath);
-
-  const child = spawn(process.execPath, [runtimePath], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true
-  });
-  child.unref();
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (await daemonHealthy()) {
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  throw new Error(`UMB daemon did not become healthy at ${DAEMON_HTTP_URL}.`);
 }
 
 async function fetchDaemonHealth(): Promise<DaemonHealth | null> {
