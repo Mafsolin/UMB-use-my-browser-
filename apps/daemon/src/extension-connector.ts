@@ -144,6 +144,11 @@ export class ExtensionConnector implements BrowserConnector {
   private lastConnectedAt?: string;
   private clientLabel?: string;
   private currentSessionId?: string;
+  private confirmedSession?: {
+    socket: WebSocket;
+    sessionId: string;
+    name?: string;
+  };
   private sessionStatus?: {
     sessionId?: string;
     sessionName?: string;
@@ -190,20 +195,65 @@ export class ExtensionConnector implements BrowserConnector {
     clientId: string;
     name?: string;
   }): Promise<void> {
+    if (
+      this.socket &&
+      this.confirmedSession?.socket === this.socket &&
+      this.confirmedSession.sessionId === session.sessionId
+    ) {
+      this.currentSessionId = session.sessionId;
+      if (session.name !== undefined && this.confirmedSession.name !== session.name) {
+        await this.updateSession({ sessionId: session.sessionId, name: session.name });
+      }
+      return;
+    }
+
+    this.invalidateConfirmedSession();
     this.currentSessionId = session.sessionId;
-    await this.send("startSession", session);
+    const socket = this.socket;
+    try {
+      await this.send("startSession", session);
+      if (socket && this.socket === socket) {
+        this.confirmedSession = {
+          socket,
+          sessionId: session.sessionId,
+          name: session.name
+        };
+      }
+    } catch (error) {
+      if (this.socket === socket) {
+        this.invalidateConfirmedSession();
+      }
+      throw error;
+    }
   }
 
   async updateSession(session: {
     sessionId: string;
     name?: string;
   }): Promise<void> {
+    const confirmed = this.confirmedSession;
     this.currentSessionId = session.sessionId;
-    if (session.name) {
+    if (session.name === undefined || confirmed?.name === session.name) {
+      return;
+    }
+
+    try {
       await this.send("nameSession", {
         sessionId: session.sessionId,
         name: session.name
       });
+      if (
+        confirmed &&
+        this.confirmedSession === confirmed &&
+        confirmed.sessionId === session.sessionId
+      ) {
+        confirmed.name = session.name;
+      }
+    } catch (error) {
+      if (this.confirmedSession === confirmed) {
+        this.invalidateConfirmedSession();
+      }
+      throw error;
     }
   }
 
@@ -212,6 +262,7 @@ export class ExtensionConnector implements BrowserConnector {
       return;
     }
 
+    this.invalidateConfirmedSession();
     try {
       await this.send("finalize", { sessionId, ownedTabIds: [], keep: [] });
       if (this.currentSessionId === sessionId) {
@@ -258,6 +309,7 @@ export class ExtensionConnector implements BrowserConnector {
     wsServer.on("connection", (socket: WebSocket) => {
       const previousSocket = this.socket;
       this.failAllPending(new Error("UMB extension reconnected before pending requests completed."));
+      this.invalidateConfirmedSession();
       this.socket = socket;
       this.lastConnectedAt = new Date().toISOString();
 
@@ -273,6 +325,7 @@ export class ExtensionConnector implements BrowserConnector {
         }
 
         this.socket = undefined;
+        this.invalidateConfirmedSession();
         this.sessionStatus = {
           sessionActive: false,
           sessionId: undefined,
@@ -408,6 +461,7 @@ export class ExtensionConnector implements BrowserConnector {
     closed: string[];
     released: string[];
   }> {
+    this.invalidateConfirmedSession();
     const result = await this.send<{
       kept: FinalizeRequest["keep"];
       closed: string[];
@@ -428,9 +482,13 @@ export class ExtensionConnector implements BrowserConnector {
 
   private async send<T>(type: string, payload?: Record<string, unknown>): Promise<T> {
     if (!this.socket || this.socket.readyState !== this.socket.OPEN) {
+      if (type === "startSession" || type === "nameSession" || type === "finalize") {
+        this.invalidateConfirmedSession();
+      }
       throw new Error("UMB daemon is up but the extension is not connected.");
     }
 
+    const socket = this.socket;
     const id = crypto.randomUUID();
     const message: BridgeRequest = { id, type, payload };
 
@@ -449,10 +507,13 @@ export class ExtensionConnector implements BrowserConnector {
           reject(reason);
         }
       });
-      this.socket!.send(JSON.stringify(message), (error?: Error) => {
+      socket.send(JSON.stringify(message), (error?: Error) => {
         if (error) {
           this.pending.delete(id);
           clearTimeout(timeout);
+          if (this.socket === socket) {
+            this.invalidateConfirmedSession();
+          }
           reject(error);
         }
       });
@@ -518,6 +579,14 @@ export class ExtensionConnector implements BrowserConnector {
       "attachedTabCount" in candidate ||
       "connectedProcessLabel" in candidate
     ) {
+      if (
+        candidate.sessionActive === false ||
+        (candidate.sessionId !== undefined &&
+          this.confirmedSession !== undefined &&
+          candidate.sessionId !== this.confirmedSession.sessionId)
+      ) {
+        this.invalidateConfirmedSession();
+      }
       this.sessionStatus = {
         sessionId: candidate.sessionId,
         sessionName: candidate.sessionName,
@@ -528,6 +597,10 @@ export class ExtensionConnector implements BrowserConnector {
       this.currentSessionId =
         candidate.sessionActive === false ? undefined : candidate.sessionId ?? this.currentSessionId;
     }
+  }
+
+  private invalidateConfirmedSession(): void {
+    this.confirmedSession = undefined;
   }
 
   private failAllPending(error: Error): void {

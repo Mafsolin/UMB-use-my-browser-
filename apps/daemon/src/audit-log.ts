@@ -14,13 +14,24 @@ export type AuditLogEntry = {
 };
 
 export class AuditLogger {
+  private directoryReady?: Promise<void>;
+  private appendQueue: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly filePath = path.join(process.cwd(), ".umb-runtime", "audit.log.jsonl")
   ) {}
 
-  async write(entry: AuditLogEntry): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await appendFile(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
+  write(entry: AuditLogEntry): Promise<void> {
+    const line = `${JSON.stringify(entry)}\n`;
+    const operation = this.appendQueue.then(async () => {
+      this.directoryReady ??= mkdir(path.dirname(this.filePath), { recursive: true }).then(
+        () => undefined
+      );
+      await this.directoryReady;
+      await appendFile(this.filePath, line, "utf8");
+    });
+    this.appendQueue = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   getPath(): string {

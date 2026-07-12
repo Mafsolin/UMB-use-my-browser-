@@ -8,8 +8,12 @@ on:
 
 jobs:
   build:
-    name: Lint / typecheck / test / build
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / lint / typecheck / test / build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

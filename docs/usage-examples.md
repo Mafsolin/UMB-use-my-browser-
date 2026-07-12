@@ -19,7 +19,8 @@
 - `goto`
 - `get_url`
 - `get_title`
-- `dom_snapshot`
+- `read_page`
+- `find_controls`
 - `click`
 - `fill`
 - `scroll`
@@ -33,11 +34,12 @@
 2. `open_tabs`
 3. `claim_tab` for an existing tab or `new_tab`
 4. `goto`
-5. `dom_snapshot`
-6. `click` / `fill` / `scroll`
-7. `screenshot`
-8. `name_session`
-9. `finalize`
+5. `read_page` and use its returned controls
+6. `find_controls` only when a narrower search is needed
+7. `click` / `fill` / `scroll`
+8. `screenshot`
+9. `name_session`
+10. `finalize`
 
 ## Browser-Only Usage
 

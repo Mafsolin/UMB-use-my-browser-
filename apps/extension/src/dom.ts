@@ -2,11 +2,13 @@ import { ensureControlledTab, runDebuggerCommand } from "./debugger.js";
 import {
   extractReadPage,
   findReadPageControls,
+  READ_PAGE_MAX_INPUT_CHARS,
   type FindControlsOptions,
   type FindControlsResult,
   type ReadPageOptions,
   type ReadPageResult
 } from "./page-extractor.js";
+import { REDACTION_MASK, redactionSelectors } from "./redaction.js";
 
 export type DomSnapshotPayload = {
   url: string;
@@ -19,6 +21,44 @@ export type ScrollResult = { x: number; y: number };
 
 export type ClickResult = { confirmed: boolean };
 export type SubmitResult = { confirmed: boolean; kind: "form" | "control" };
+
+type RedactedPageTransport = {
+  url: string;
+  title: string;
+  documentHtml: string;
+  documentHtmlTruncated: boolean;
+};
+
+const REDACTED_PAGE_EXPRESSION = `(() => {
+  const clone = document.documentElement.cloneNode(true);
+  for (const selector of ${JSON.stringify(redactionSelectors())}) {
+    clone.querySelectorAll(selector).forEach((element) => {
+      if (element instanceof HTMLInputElement) {
+        element.value = ${JSON.stringify(REDACTION_MASK)};
+        element.setAttribute("value", ${JSON.stringify(REDACTION_MASK)});
+      }
+      element.textContent = ${JSON.stringify(REDACTION_MASK)};
+    });
+  }
+  const fullHtml = clone.outerHTML;
+  return {
+    url: location.href,
+    title: document.title,
+    documentHtml: fullHtml.slice(0, ${READ_PAGE_MAX_INPUT_CHARS}),
+    documentHtmlTruncated: fullHtml.length > ${READ_PAGE_MAX_INPUT_CHARS}
+  };
+})()`;
+
+async function readRedactedPageTransport(
+  sessionId: string,
+  tabId: number
+): Promise<RedactedPageTransport> {
+  return evaluateOnControlledTab<RedactedPageTransport>(
+    sessionId,
+    tabId,
+    REDACTED_PAGE_EXPRESSION
+  );
+}
 
 export async function evaluateOnControlledTab<T>(
   sessionId: string,
@@ -54,28 +94,11 @@ export async function readPage(
   tabId: number,
   options: ReadPageOptions
 ): Promise<ReadPageResult> {
-  const raw = await evaluateOnControlledTab<{
-    url: string;
-    title: string;
-    documentHtml: string;
-  }>(
-    sessionId,
-    tabId,
-    `(() => {
-      const clone = document.documentElement.cloneNode(true);
-      for (const selector of ["input[type='password']", "[autocomplete^='cc-']", "[data-sensitive]"]) {
-        clone.querySelectorAll(selector).forEach((element) => {
-          if (element instanceof HTMLInputElement) {
-            element.value = "[UMB REDACTED]";
-            element.setAttribute("value", "[UMB REDACTED]");
-          }
-          element.textContent = "[UMB REDACTED]";
-        });
-      }
-      return { url: location.href, title: document.title, documentHtml: clone.outerHTML };
-    })()`
-  );
-  return extractReadPage({ ...raw, redacted: true }, options);
+  const raw = await readRedactedPageTransport(sessionId, tabId);
+  const result = extractReadPage({ ...raw, redacted: true }, options);
+  return raw.documentHtmlTruncated && !result.truncated
+    ? { ...result, truncated: true }
+    : result;
 }
 
 export async function findControls(
@@ -83,27 +106,7 @@ export async function findControls(
   tabId: number,
   options: FindControlsOptions
 ): Promise<FindControlsResult> {
-  const raw = await evaluateOnControlledTab<{
-    url: string;
-    title: string;
-    documentHtml: string;
-  }>(
-    sessionId,
-    tabId,
-    `(() => {
-      const clone = document.documentElement.cloneNode(true);
-      for (const selector of ["input[type='password']", "[autocomplete^='cc-']", "[data-sensitive]"]) {
-        clone.querySelectorAll(selector).forEach((element) => {
-          if (element instanceof HTMLInputElement) {
-            element.value = "[UMB REDACTED]";
-            element.setAttribute("value", "[UMB REDACTED]");
-          }
-          element.textContent = "[UMB REDACTED]";
-        });
-      }
-      return { url: location.href, title: document.title, documentHtml: clone.outerHTML };
-    })()`
-  );
+  const raw = await readRedactedPageTransport(sessionId, tabId);
   return findReadPageControls({ ...raw, redacted: true }, options);
 }
 

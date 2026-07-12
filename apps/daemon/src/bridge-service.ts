@@ -99,17 +99,8 @@ export class BridgeService {
     const session = this.sessionManager.getSession(command.sessionId);
 
     try {
-      if (command.type !== "openTabs") {
-        if (this.finalizedSessionIds.has(command.sessionId)) {
-          throw new Error(`UMB session ${command.sessionId} is already finalized. Create a new session to continue browser control.`);
-        }
-
-        this.activeSessionId = session.sessionId;
-        await this.connector.beginSession?.({
-          sessionId: session.sessionId,
-          clientId: session.clientId,
-          name: session.name
-        });
+      if (command.type !== "openTabs" && this.finalizedSessionIds.has(command.sessionId)) {
+        throw new Error(`UMB session ${command.sessionId} is already finalized. Create a new session to continue browser control.`);
       }
 
       if (command.type === "nameSession") {
@@ -117,12 +108,30 @@ export class BridgeService {
           command.sessionId,
           command.params.name
         );
-        await this.connector.updateSession?.({
-          sessionId: result.sessionId,
-          name: result.name
-        });
-        await this.writeAudit(session, command, "ok");
+        this.activeSessionId = result.sessionId;
+        if (this.connector.beginSession) {
+          await this.connector.beginSession({
+            sessionId: result.sessionId,
+            clientId: result.clientId,
+            name: result.name
+          });
+        } else {
+          await this.connector.updateSession?.({
+            sessionId: result.sessionId,
+            name: result.name
+          });
+        }
+        await this.writeAudit(result, command, "ok");
         return result;
+      }
+
+      if (command.type !== "openTabs") {
+        this.activeSessionId = session.sessionId;
+        await this.connector.beginSession?.({
+          sessionId: session.sessionId,
+          clientId: session.clientId,
+          name: session.name
+        });
       }
 
       if (command.type === "goto" || (command.type === "newTab" && command.params.url)) {

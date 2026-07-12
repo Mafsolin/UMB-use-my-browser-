@@ -3,6 +3,7 @@ export type NavigationProbeState = {
   url?: string;
   title?: string;
   readyState?: string;
+  domReadable?: boolean;
   documentHtml?: string;
 };
 
@@ -43,10 +44,12 @@ export function isUsableNavigationState(
   const domReady =
     state.readyState === "interactive" || state.readyState === "complete";
   const currentUrl = state.href ?? state.url;
-  const domReadable = Boolean(
-    (state.title && state.title.length > 0) ||
-      (state.documentHtml && state.documentHtml.length > 0)
-  );
+  const domReadable =
+    state.domReadable ??
+    Boolean(
+      (state.title && state.title.length > 0) ||
+        (state.documentHtml && state.documentHtml.length > 0)
+    );
 
   if (!isCommittedNavigation(state, requestedUrl, previousUrl)) {
     return false;

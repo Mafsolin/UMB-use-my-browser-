@@ -6,7 +6,7 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build.mjs",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -201,6 +201,84 @@ describe("ExtensionConnector WebSocket transport", () => {
     await expect(fetch(`http://127.0.0.1:${setup.port}/health`)).resolves.toMatchObject({ status: 200 });
   });
 
+  it("sends startSession once for repeated activation on one socket generation", async () => {
+    const setup = await startConnectorServer(token, origin);
+    server = setup.server;
+    connector = setup.connector;
+    const socket = await connect(setup.port, token, origin);
+    sockets.push(socket);
+    const requests = respondToRequests(socket);
+    const session = { sessionId: "session-a", clientId: "mcp" };
+
+    await connector.beginSession(session);
+    for (let index = 0; index < 99; index += 1) {
+      await connector.beginSession(session);
+    }
+
+    expect(requests.map((request) => request.type)).toEqual(["startSession"]);
+  });
+
+  it("updates a confirmed session name without another startSession request", async () => {
+    const setup = await startConnectorServer(token, origin);
+    server = setup.server;
+    connector = setup.connector;
+    const socket = await connect(setup.port, token, origin);
+    sockets.push(socket);
+    const requests = respondToRequests(socket);
+
+    await connector.beginSession({ sessionId: "session-a", clientId: "mcp" });
+    await connector.beginSession({ sessionId: "session-a", clientId: "mcp", name: "research" });
+    await connector.beginSession({ sessionId: "session-a", clientId: "mcp", name: "research" });
+
+    expect(requests.map((request) => request.type)).toEqual(["startSession", "nameSession"]);
+  });
+
+  it("invalidates startSession confirmation on session switch and reconnect", async () => {
+    const setup = await startConnectorServer(token, origin);
+    server = setup.server;
+    connector = setup.connector;
+    const firstSocket = await connect(setup.port, token, origin);
+    sockets.push(firstSocket);
+    const firstRequests = respondToRequests(firstSocket);
+
+    await connector.beginSession({ sessionId: "session-a", clientId: "mcp" });
+    await connector.beginSession({ sessionId: "session-b", clientId: "mcp" });
+    await connector.beginSession({ sessionId: "session-b", clientId: "mcp" });
+
+    const secondSocket = await connect(setup.port, token, origin);
+    sockets.push(secondSocket);
+    const secondRequests = respondToRequests(secondSocket);
+    await connector.beginSession({ sessionId: "session-b", clientId: "mcp" });
+
+    expect(firstRequests.map((request) => request.type)).toEqual(["startSession", "startSession"]);
+    expect(secondRequests.map((request) => request.type)).toEqual(["startSession"]);
+  });
+
+  it("retries startSession after a WebSocket send failure", async () => {
+    const setup = await startConnectorServer(token, origin);
+    server = setup.server;
+    connector = setup.connector;
+    const socket = await connect(setup.port, token, origin);
+    sockets.push(socket);
+    const serverSocket = (connector as unknown as { socket: WebSocket }).socket;
+    const originalSend = serverSocket.send.bind(serverSocket);
+    const send = vi.spyOn(serverSocket, "send").mockImplementationOnce((
+      _data: Parameters<WebSocket["send"]>[0],
+      callback?: (error?: Error) => void
+    ) => {
+      callback?.(new Error("synthetic send failure"));
+    });
+
+    await expect(connector.beginSession({ sessionId: "session-a", clientId: "mcp" }))
+      .rejects.toThrow(/synthetic send failure/i);
+
+    send.mockImplementation(originalSend);
+    const requests = respondToRequests(socket);
+    await connector.beginSession({ sessionId: "session-a", clientId: "mcp" });
+
+    expect(requests.map((request) => request.type)).toEqual(["startSession"]);
+  });
+
   it("keeps a replacement socket and its pending request when the old socket closes", async () => {
     const setup = await startConnectorServer(token, origin);
     server = setup.server;
@@ -236,7 +314,18 @@ describe("ExtensionConnector WebSocket transport", () => {
 type BridgeRequest = {
   id: string;
   type: string;
+  payload?: Record<string, unknown>;
 };
+
+function respondToRequests(socket: WebSocket): BridgeRequest[] {
+  const requests: BridgeRequest[] = [];
+  socket.on("message", (raw) => {
+    const request = JSON.parse(String(raw)) as BridgeRequest;
+    requests.push(request);
+    socket.send(JSON.stringify({ id: request.id, ok: true, result: {} }));
+  });
+  return requests;
+}
 
 async function startConnectorServer(
   token: string,

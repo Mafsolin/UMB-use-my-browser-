@@ -7,10 +7,8 @@ const debuggerMocks = vi.hoisted(() => ({
   forceDetachDebugger: vi.fn(),
   runDebuggerCommand: vi.fn()
 }));
-const evaluateOnControlledTab = vi.hoisted(() => vi.fn());
 
 vi.mock("./debugger.js", () => debuggerMocks);
-vi.mock("./dom.js", () => ({ evaluateOnControlledTab }));
 vi.mock("./status.js", () => ({
   getStatusResponse: vi.fn(() => ({ clientLabel: "test" })),
   syncSessionStatus: vi.fn()
@@ -19,12 +17,18 @@ vi.mock("./status.js", () => ({
 let extensionState: typeof import("./bridge-state.js").extensionState;
 let claimTab: typeof import("./tabs.js").claimTab;
 let cleanupStaleTemporaryTabs: typeof import("./tabs.js").cleanupStaleTemporaryTabs;
+let getTitle: typeof import("./tabs.js").getTitle;
+let getUrl: typeof import("./tabs.js").getUrl;
 let goto: typeof import("./tabs.js").goto;
 let isUmbResidueTab: typeof import("./tabs.js").isUmbResidueTab;
 let newTab: typeof import("./tabs.js").newTab;
+let openTabs: typeof import("./tabs.js").openTabs;
+let startSession: typeof import("./tabs.js").startSession;
 
+const tabGroupsGet = vi.fn();
 const tabsCreate = vi.fn<() => Promise<chrome.tabs.Tab>>();
 const tabsGet = vi.fn();
+const tabsQuery = vi.fn(async () => [] as chrome.tabs.Tab[]);
 const tabsRemove = vi.fn();
 
 function clearExtensionState() {
@@ -46,7 +50,7 @@ describe("tab lifecycle", () => {
       },
       tabGroups: {
         TAB_GROUP_ID_NONE: -1,
-        get: vi.fn(),
+        get: tabGroupsGet,
         query: vi.fn(async () => []),
         update: vi.fn()
       },
@@ -54,14 +58,23 @@ describe("tab lifecycle", () => {
         create: tabsCreate,
         get: tabsGet,
         group: vi.fn(async () => 1),
-        query: vi.fn(async () => []),
+        query: tabsQuery,
         remove: tabsRemove,
         update: vi.fn()
       }
     });
     ({ extensionState } = await import("./bridge-state.js"));
-    ({ claimTab, cleanupStaleTemporaryTabs, goto, isUmbResidueTab, newTab } =
-      await import("./tabs.js"));
+    ({
+      claimTab,
+      cleanupStaleTemporaryTabs,
+      getTitle,
+      getUrl,
+      goto,
+      isUmbResidueTab,
+      newTab,
+      openTabs,
+      startSession
+    } = await import("./tabs.js"));
   });
 
   beforeEach(() => {
@@ -69,6 +82,7 @@ describe("tab lifecycle", () => {
     vi.useRealTimers();
     clearExtensionState();
     debuggerMocks.forceDetachDebugger.mockResolvedValue(undefined);
+    tabsQuery.mockResolvedValue([]);
     tabsRemove.mockResolvedValue(undefined);
   });
 
@@ -169,29 +183,97 @@ describe("tab lifecycle", () => {
       url: initialUrl,
       windowId: 3
     } as chrome.tabs.Tab);
-    debuggerMocks.runDebuggerCommand.mockResolvedValue({});
-
     let probe = 0;
-    evaluateOnControlledTab.mockImplementation(
-      async (_sessionId: string, _tabId: number, expression: string) => {
-        if (expression === "location.href") {
-          probe += 1;
-          return probe === 1 ? initialUrl : redirectedUrl;
+    debuggerMocks.runDebuggerCommand.mockImplementation(
+      async (_tabId: number, method: string) => {
+        if (method !== "Runtime.evaluate") {
+          return {};
         }
-        if (expression === "document.readyState") {
-          return "complete";
-        }
-        if (expression === "document.title") {
-          return probe === 1 ? "Old page" : "Redirected page";
-        }
-        return "<html><body>loaded</body></html>";
+        probe += 1;
+        return {
+          result: {
+            value:
+              probe === 1
+                ? {
+                    domReadable: true,
+                    href: initialUrl,
+                    readyState: "complete",
+                    title: "Old page"
+                  }
+                : {
+                    domReadable: true,
+                    href: redirectedUrl,
+                    readyState: "complete",
+                    title: "Redirected page"
+                  }
+          }
+        };
       }
     );
+    debuggerMocks.ensureControlledTab.mockResolvedValue({
+      active: false,
+      id: 43,
+      status: "complete",
+      url: initialUrl,
+      windowId: 3
+    } as chrome.tabs.Tab);
 
     const navigation = goto("session-a", 43, requestedUrl);
     await vi.advanceTimersByTimeAsync(250);
     await expect(navigation).resolves.toBeUndefined();
 
-    expect(evaluateOnControlledTab).toHaveBeenCalledTimes(8);
+    expect(debuggerMocks.runDebuggerCommand).toHaveBeenCalledTimes(3);
+    expect(
+      debuggerMocks.runDebuggerCommand.mock.calls.filter((call) => call[1] === "Runtime.evaluate")
+    ).toHaveLength(2);
+    expect(tabsGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the existing-session fast path before cleanup queries", async () => {
+    extensionState.sessions.set("session-a", {
+      clientId: "a",
+      name: "Old name",
+      sessionId: "session-a",
+      tabIds: new Set([43])
+    });
+
+    await startSession("session-a", "a", "Updated name");
+
+    expect(extensionState.sessions.get("session-a")?.name).toBe("Updated name");
+    expect(tabsQuery).not.toHaveBeenCalled();
+    expect(debuggerMocks.detachDebuggerNow).not.toHaveBeenCalled();
+  });
+
+  it("reuses the validated controlled tab for url and title", async () => {
+    const tab = {
+      active: false,
+      id: 46,
+      title: "Example",
+      url: "https://example.com/",
+      windowId: 3
+    } as chrome.tabs.Tab;
+    debuggerMocks.ensureControlledTab.mockResolvedValue(tab);
+
+    await expect(getUrl("session-a", 46)).resolves.toBe("https://example.com/");
+    await expect(getTitle("session-a", 46)).resolves.toBe("Example");
+
+    expect(debuggerMocks.ensureControlledTab).toHaveBeenCalledTimes(2);
+    expect(tabsGet).not.toHaveBeenCalled();
+  });
+
+  it("queries tabs once and resolves each group once when opening tabs", async () => {
+    tabsQuery.mockResolvedValue([
+      { active: true, groupId: 7, id: 47, title: "One", url: "https://one.test/" },
+      { active: false, groupId: 7, id: 48, title: "Two", url: "https://two.test/" },
+      { active: false, groupId: -1, id: 49, title: "Three", url: "https://three.test/" }
+    ] as chrome.tabs.Tab[]);
+    tabGroupsGet.mockResolvedValue({ id: 7, title: "Work" });
+
+    await expect(openTabs()).resolves.toHaveLength(3);
+
+    expect(tabsQuery).toHaveBeenCalledTimes(1);
+    expect(tabGroupsGet).toHaveBeenCalledTimes(1);
+    expect(tabGroupsGet).toHaveBeenCalledWith(7);
+    expect(tabsRemove).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -336,7 +336,36 @@ describe("BridgeService", () => {
     ).rejects.toThrow(/already finalized/i);
   });
 
-  it("serializes parallel commands so connector session context cannot leak", async () => {
+  it("names a new session with one connector activation operation", async () => {
+    const connector = new FakeConnector();
+    const beginSession = vi.spyOn(connector, "beginSession");
+    const updateSession = vi.spyOn(connector, "updateSession");
+    const service = new BridgeService(connector);
+    const session = service.createSession({
+      clientId: "operation-count",
+      permissions: {
+        allowNavigation: true,
+        allowTyping: true,
+        allowExternalSideEffects: true
+      }
+    });
+
+    await service.executeCommand({
+      type: "nameSession",
+      sessionId: session.sessionId,
+      params: { name: "single-operation" }
+    });
+
+    expect(beginSession).toHaveBeenCalledTimes(1);
+    expect(beginSession).toHaveBeenCalledWith({
+      sessionId: session.sessionId,
+      clientId: "operation-count",
+      name: "single-operation"
+    });
+    expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps command execution globally serialized across sessions", async () => {
     const connector = new FakeConnector();
     const calls: string[] = [];
     let releaseFirst: (() => void) | undefined;
@@ -385,6 +414,27 @@ describe("BridgeService", () => {
       "begin:session-a",
       "begin:session-b"
     ]);
+  });
+
+  it("serializes audit appends in call order for a deterministic burst", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "umb-audit-burst-"));
+    const filePath = path.join(tempDir, "nested", "audit.jsonl");
+    const auditLogger = new AuditLogger(filePath);
+    const writes = Array.from({ length: 100 }, (_, index) => auditLogger.write({
+      timestamp: new Date(index).toISOString(),
+      sessionId: "burst-session",
+      clientId: "benchmark",
+      commandType: `command-${index}`,
+      result: "ok"
+    }));
+
+    await Promise.all(writes);
+
+    const lines = (await readFile(filePath, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(100);
+    expect(lines.map((line) => (JSON.parse(line) as { commandType: string }).commandType))
+      .toEqual(Array.from({ length: 100 }, (_, index) => `command-${index}`));
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   it("keeps a successful browser result when audit storage is unavailable", async () => {

@@ -1,3 +1,4 @@
+import { SCREENSHOT_CAPTURE_TIMEOUT_MS } from "./bridge-state.js";
 import { ensureControlledTab, runDebuggerCommand } from "./debugger.js";
 import { redactionCss } from "./redaction.js";
 
@@ -11,7 +12,8 @@ export async function screenshot(sessionId: string, tabId: number): Promise<stri
       tabId,
       "Page.captureScreenshot",
       { format: "png" },
-      "screenshot"
+      "screenshot",
+      SCREENSHOT_CAPTURE_TIMEOUT_MS
     );
     return `data:image/png;base64,${result.data}`;
   } finally {

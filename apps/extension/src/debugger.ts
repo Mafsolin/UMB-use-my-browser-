@@ -63,11 +63,16 @@ export async function runDebuggerCommand<T>(
   stage: DebuggerStage,
   timeoutMs = DEBUGGER_STAGE_TIMEOUT_MS
 ): Promise<T> {
-  return await withTimeout(
-    chrome.debugger.sendCommand({ tabId }, method, commandParams) as unknown as Promise<T>,
-    `Debugger ${stage} for tab ${tabId}`,
-    timeoutMs
-  );
+  try {
+    return await withTimeout(
+      chrome.debugger.sendCommand({ tabId }, method, commandParams) as unknown as Promise<T>,
+      `Debugger ${stage} for tab ${tabId}`,
+      timeoutMs
+    );
+  } catch (error) {
+    await refreshAttachedTabsFromBrowser();
+    throw error;
+  }
 }
 
 export function describeDebuggerError(
@@ -95,7 +100,6 @@ export async function attachDebugger(
   tabId: number,
   mode: DebuggerAttachMode = "background"
 ): Promise<void> {
-  await refreshAttachedTabsFromBrowser();
   if (extensionState.attachedTabs.has(tabId)) {
     return;
   }
@@ -131,7 +135,7 @@ export async function attachDebugger(
     await runDebuggerCommand(tabId, "Page.enable", undefined, "page-enable");
     extensionState.attachedTabs.add(tabId);
     extensionState.lastDetachReasons.delete(tabId);
-    await refreshAttachedTabsFromBrowser();
+    syncSessionStatus();
   } catch (error) {
     await forceDetachDebugger(tabId);
     throw new Error(
@@ -166,7 +170,10 @@ export async function detachDebuggerNow(tabId: number): Promise<void> {
   await forceDetachDebugger(tabId);
 }
 
-export async function ensureControlledTab(sessionId: string, tabId: number): Promise<void> {
+export async function ensureControlledTab(
+  sessionId: string,
+  tabId: number
+): Promise<chrome.tabs.Tab> {
   const session = extensionState.sessions.get(sessionId);
   if (!session) {
     throw new Error(`Unknown UMB session ${sessionId}.`);
@@ -182,6 +189,7 @@ export async function ensureControlledTab(sessionId: string, tabId: number): Pro
   }
 
   await attachDebugger(tabId);
+  return liveTab;
 }
 
 function purgeTrackedTab(tabId: number) {

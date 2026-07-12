@@ -5,6 +5,40 @@ node_modules/
 coverage/
 *.log
 *.tmp
-apps/extension/icons/icon-master-circle.png
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Tool and editor caches
+.pnpm-store/
+.cache/
+.turbo/
+.eslintcache
+*.tsbuildinfo
+.idea/
+.vscode/
+
+# Local package and runtime artifacts
+*.tgz
+*.crx
+*.pid
+*.sock
+*.sqlite
+*.sqlite3
+*.db
+
+# OS metadata
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+apps/extension/icons/icon-master-circle.png
 

@@ -14,7 +14,6 @@ import {
   forceDetachDebugger,
   runDebuggerCommand
 } from "./debugger.js";
-import { evaluateOnControlledTab } from "./dom.js";
 import { syncSessionStatus, getStatusResponse } from "./status.js";
 import {
   isCommittedNavigation,
@@ -49,9 +48,13 @@ export async function getTabGroupTitle(groupId?: number): Promise<string | undef
   }
 }
 
-export async function simplifyTab(tab: chrome.tabs.Tab): Promise<SimplifiedTab> {
+export async function simplifyTab(
+  tab: chrome.tabs.Tab,
+  knownTabGroup?: string | null
+): Promise<SimplifiedTab> {
   const entry = extensionState.registry.get(tab.id ?? -1);
-  const tabGroup = await getTabGroupTitle(tab.groupId);
+  const tabGroup =
+    knownTabGroup === null ? undefined : knownTabGroup ?? (await getTabGroupTitle(tab.groupId));
   return {
     id: String(tab.id),
     title: tab.title,
@@ -153,13 +156,38 @@ export function isUmbResidueTab(tab: chrome.tabs.Tab, tabGroup?: string): boolea
   );
 }
 
-export async function cleanupStaleUmbGroupResidue(): Promise<void> {
-  const tabs = await chrome.tabs.query({});
+async function getTabGroupTitles(
+  tabs: chrome.tabs.Tab[]
+): Promise<Map<number, string | undefined>> {
+  const groupIds = [
+    ...new Set(
+      tabs
+        .map((tab) => tab.groupId)
+        .filter(
+          (groupId): groupId is number =>
+            groupId != null && groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE
+        )
+    )
+  ];
+  const groupTitles = await Promise.all(
+    groupIds.map(async (groupId) => [groupId, await getTabGroupTitle(groupId)] as const)
+  );
+  return new Map(groupTitles);
+}
+
+async function cleanupStaleUmbGroupResidueFromTabs(
+  tabs: chrome.tabs.Tab[],
+  groupTitles: Map<number, string | undefined>
+): Promise<Set<number>> {
+  const removedTabIds = new Set<number>();
   for (const tab of tabs) {
     if (tab.id == null) {
       continue;
     }
-    const tabGroup = await getTabGroupTitle(tab.groupId);
+    const tabGroup =
+      tab.groupId == null || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE
+        ? undefined
+        : groupTitles.get(tab.groupId);
     if (!isUmbResidueTab(tab, tabGroup)) {
       continue;
     }
@@ -167,41 +195,70 @@ export async function cleanupStaleUmbGroupResidue(): Promise<void> {
     await chrome.tabs.remove(tab.id).catch(() => undefined);
     extensionState.registry.delete(tab.id);
     removeTabFromSessions(tab.id);
+    removedTabIds.add(tab.id);
   }
   syncSessionStatus();
+  return removedTabIds;
 }
 
-export async function probeTabState(sessionId: string, tabId: number) {
-  const tab = await getTabIfExists(tabId);
-  if (!tab) {
+export async function cleanupStaleUmbGroupResidue(): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+  const groupTitles = await getTabGroupTitles(tabs);
+  await cleanupStaleUmbGroupResidueFromTabs(tabs, groupTitles);
+}
+
+export async function probeTabState(
+  _sessionId: string,
+  tabId: number,
+  tab?: chrome.tabs.Tab
+) {
+  const liveTab = tab ?? (await getTabIfExists(tabId));
+  if (!liveTab) {
     purgeTrackedTab(tabId);
     throw new Error(`Tab ${tabId} is missing before readiness probing.`);
   }
 
-  const href = await evaluateOnControlledTab<string>(sessionId, tabId, "location.href").catch(
-    () => tab.url ?? ""
-  );
-  const readyState = await evaluateOnControlledTab<string>(
-    sessionId,
+  const fallback = {
+    domReadable: Boolean(liveTab.title),
+    href: liveTab.url ?? "",
+    readyState: liveTab.status === "complete" ? "complete" : "loading",
+    title: liveTab.title ?? ""
+  };
+  const probe = await runDebuggerCommand<{
+    exceptionDetails?: { text?: string };
+    result: {
+      value?: {
+        domReadable?: boolean;
+        href?: string;
+        readyState?: string;
+        title?: string;
+      };
+    };
+  }>(
     tabId,
-    "document.readyState"
-  ).catch(() => (tab.status === "complete" ? "complete" : "loading"));
-  const title = await evaluateOnControlledTab<string>(sessionId, tabId, "document.title").catch(
-    () => tab.title ?? ""
-  );
-  const documentHtml = await evaluateOnControlledTab<string>(
-    sessionId,
-    tabId,
-    "document.documentElement?.outerHTML ?? ''"
-  ).catch(() => "");
+    "Runtime.evaluate",
+    {
+      expression: `(() => ({
+        href: location.href,
+        readyState: document.readyState,
+        title: document.title,
+        domReadable: Boolean(document.title || document.documentElement?.hasChildNodes())
+      }))()`,
+      returnByValue: true,
+      awaitPromise: true
+    },
+    "evaluate"
+  )
+    .then((result) =>
+      result.exceptionDetails ? fallback : (result.result.value ?? fallback)
+    )
+    .catch(() => fallback);
 
   return {
-    documentHtml,
-    href,
-    readyState,
-    status: tab.status,
-    title,
-    url: tab.url
+    ...fallback,
+    ...probe,
+    status: liveTab.status,
+    url: liveTab.url
   };
 }
 
@@ -221,7 +278,7 @@ export async function waitForUsableNavigation(
       throw new Error(`Tab ${tabId} is missing before navigation became usable.`);
     }
 
-    const state = await probeTabState(sessionId, tabId);
+    const state = await probeTabState(sessionId, tabId, tab);
     if (isCommittedNavigation(state, requestedUrl, initialUrl)) {
       sawCommittedUrl = true;
     }
@@ -248,10 +305,6 @@ export async function startSession(
   clientId: string,
   name?: string
 ): Promise<StatusResponse> {
-  await cleanupDanglingSessionEntries();
-  await cleanupStaleTemporaryTabs();
-  await cleanupStaleUmbGroupResidue();
-
   const existing = extensionState.sessions.get(sessionId);
   if (existing) {
     existing.name = name ?? existing.name;
@@ -259,6 +312,10 @@ export async function startSession(
     syncSessionStatus();
     return getStatusResponse();
   }
+
+  await cleanupDanglingSessionEntries();
+  await cleanupStaleTemporaryTabs();
+  await cleanupStaleUmbGroupResidue();
 
   extensionState.sessions.set(sessionId, {
     clientId,
@@ -273,10 +330,20 @@ export async function startSession(
 
 export async function openTabs(): Promise<SimplifiedTab[]> {
   await cleanupStaleTemporaryTabs();
-  await cleanupStaleUmbGroupResidue();
   const tabs = await chrome.tabs.query({});
-  const eligibleTabs = tabs.filter((tab) => tab.id != null);
-  return Promise.all(eligibleTabs.map((tab) => simplifyTab(tab)));
+  const groupTitles = await getTabGroupTitles(tabs);
+  const removedTabIds = await cleanupStaleUmbGroupResidueFromTabs(tabs, groupTitles);
+  const eligibleTabs = tabs.filter((tab) => tab.id != null && !removedTabIds.has(tab.id));
+  return Promise.all(
+    eligibleTabs.map((tab) =>
+      simplifyTab(
+        tab,
+        tab.groupId == null || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE
+          ? null
+          : (groupTitles.get(tab.groupId) ?? null)
+      )
+    )
+  );
 }
 
 export async function claimTab(sessionId: string, tabId: number): Promise<SimplifiedTab> {
@@ -363,8 +430,8 @@ export async function newTab(sessionId: string, url?: string): Promise<Simplifie
 }
 
 export async function goto(sessionId: string, tabId: number, url: string): Promise<void> {
-  await ensureControlledTab(sessionId, tabId);
-  const initialUrl = (await getTabIfExists(tabId))?.url;
+  const tab = await ensureControlledTab(sessionId, tabId);
+  const initialUrl = tab.url;
   const result = await runDebuggerCommand<{ errorText?: string }>(
     tabId,
     "Page.navigate",
@@ -378,23 +445,11 @@ export async function goto(sessionId: string, tabId: number, url: string): Promi
 }
 
 export async function getUrl(sessionId: string, tabId: number): Promise<string | undefined> {
-  await ensureControlledTab(sessionId, tabId);
-  const tab = await getTabIfExists(tabId);
-  if (!tab) {
-    purgeTrackedTab(tabId);
-    throw new Error(`No tab with id: ${tabId}.`);
-  }
-  return tab.url;
+  return (await ensureControlledTab(sessionId, tabId)).url;
 }
 
 export async function getTitle(sessionId: string, tabId: number): Promise<string | undefined> {
-  await ensureControlledTab(sessionId, tabId);
-  const tab = await getTabIfExists(tabId);
-  if (!tab) {
-    purgeTrackedTab(tabId);
-    throw new Error(`No tab with id: ${tabId}.`);
-  }
-  return tab.title;
+  return (await ensureControlledTab(sessionId, tabId)).title;
 }
 
 export async function nameSession(
