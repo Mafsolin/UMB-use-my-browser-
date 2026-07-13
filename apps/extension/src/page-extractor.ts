@@ -156,9 +156,25 @@ const CONTROL_SELECTOR = [
 ].join(", ");
 
 function selectorFor(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const doc = element.ownerDocument;
+  const uniqueAttributeSelector = (attribute: string): string | undefined => {
+    const value = element.getAttribute(attribute);
+    if (!value) return undefined;
+    const selector = `${tag}[${attribute}=${JSON.stringify(value)}]`;
+    try {
+      return doc.querySelectorAll(selector).length === 1 ? selector : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const id = element.getAttribute("id");
   if (id && /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(id)) {
     return `#${id}`;
+  }
+  for (const attribute of ["data-testid", "data-test", "name", "aria-label", "role"]) {
+    const selector = uniqueAttributeSelector(attribute);
+    if (selector) return selector;
   }
   const segments: string[] = [];
   let current: Element | null = element;
@@ -173,7 +189,13 @@ function selectorFor(element: Element): string {
 function isVisible(element: Element): boolean {
   if (element.matches("input[type='hidden']")) return false;
   for (let current: Element | null = element; current; current = current.parentElement) {
-    if (current.hasAttribute("hidden") || current.getAttribute("aria-hidden") === "true" || /display\s*:\s*none|visibility\s*:\s*hidden/iu.test(current.getAttribute("style") ?? "")) return false;
+    const style = current.getAttribute("style") ?? "";
+    if (
+      current.hasAttribute("hidden") ||
+      current.getAttribute("aria-hidden") === "true" ||
+      /display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|content-visibility\s*:\s*hidden/iu.test(style) ||
+      /opacity\s*:\s*0(?:\s*;|\s*$)/iu.test(style)
+    ) return false;
   }
   return true;
 }
@@ -190,12 +212,28 @@ function sanitizedHref(rawHref: string, baseUrl: string): string | undefined {
   }
 }
 
+function referencedText(element: Element, attribute: "aria-labelledby" | "aria-describedby"): string | undefined {
+  const ids = (element.getAttribute(attribute) ?? "").trim().split(/\s+/u).filter(Boolean);
+  if (ids.length === 0) return undefined;
+  return normalizedText(ids.map((id) => element.ownerDocument.getElementById(id)?.textContent ?? "").join(" "));
+}
+
 function controlLabel(element: Element): string | undefined {
   const aria = normalizedText(element.getAttribute("aria-label"));
   if (aria) return aria;
+  const labelledBy = referencedText(element, "aria-labelledby");
+  if (labelledBy) return labelledBy;
   const id = element.getAttribute("id");
   const label = id ? Array.from(element.ownerDocument.querySelectorAll("label")).find((item) => item.htmlFor === id) : undefined;
-  return normalizedText(label?.textContent ?? element.closest("label")?.textContent ?? element.getAttribute("title") ?? element.getAttribute("placeholder") ?? element.textContent);
+  const candidates = [
+    label?.textContent,
+    element.closest("label")?.textContent,
+    element.getAttribute("title"),
+    element.getAttribute("placeholder"),
+    element.textContent,
+    referencedText(element, "aria-describedby")
+  ];
+  return candidates.map(normalizedText).find((value): value is string => Boolean(value));
 }
 
 function extractControls(doc: Document, baseUrl: string, maskedValues: string[]): ReadPageControl[] {
@@ -205,7 +243,9 @@ function extractControls(doc: Document, baseUrl: string, maskedValues: string[])
     const href = type === "link" ? sanitizedHref(element.getAttribute("href") ?? "", baseUrl) : undefined;
     const label = redactText(controlLabel(element) ?? "", maskedValues) || undefined;
     const disabled = element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true";
-    return { type, selector: selectorFor(element), ...(label ? { label } : {}), ...(href ? { href } : {}), visible, actionable: visible && !disabled && (type !== "link" || Boolean(href)) };
+    const inert = Boolean(element.closest("[inert]"));
+    const actionable = visible && !disabled && !inert && (type !== "link" || Boolean(href));
+    return { type, selector: selectorFor(element), ...(label ? { label } : {}), ...(href ? { href } : {}), visible, actionable };
   });
 }
 

@@ -130,6 +130,12 @@ describe("daemon server", () => {
     expect(body).toContain('id="go"');
     expect(body).toContain('id="submit-button"');
     expect(body).toContain('id="submit-result"');
+    expect(body).toContain('id="composer"');
+    expect(body).toContain('contenteditable="true"');
+    expect(body).toContain('id="composer-input-count"');
+    expect(body).toContain('id="composer-keyboard-count"');
+    expect(body).toContain("event.key === 'Enter'");
+    expect(body).toContain('id="composer-send-count"');
   });
 
   it("returns 503 for auth bootstrap when no bridge auth is configured", async () => {

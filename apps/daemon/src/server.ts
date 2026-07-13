@@ -54,6 +54,27 @@ const umbTestPageHtml = `<!doctype html>
         </button>
       </form>
       <p id="echo"></p>
+      <form
+        id="composer-form"
+        onsubmit="event.preventDefault(); document.getElementById('composer-send-count').textContent=String(Number(document.getElementById('composer-send-count').textContent) + 1); document.getElementById('composer-result').textContent=document.getElementById('composer').textContent;"
+      >
+        <label for="composer">Rich message</label>
+        <div
+          id="composer"
+          contenteditable="true"
+          role="textbox"
+          aria-multiline="true"
+          oninput="document.getElementById('composer-input-count').textContent=String(Number(document.getElementById('composer-input-count').textContent) + 1); document.getElementById('composer-input-value').textContent=this.textContent;"
+          onkeydown="document.getElementById('composer-keyboard-count').textContent=String(Number(document.getElementById('composer-keyboard-count').textContent) + 1); document.getElementById('composer-last-key').textContent=event.key; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.closest('form').requestSubmit(); }"
+        ></div>
+        <button id="composer-send" type="submit">Send rich message</button>
+      </form>
+      <p>Input events: <span id="composer-input-count">0</span></p>
+      <p>Keyboard events: <span id="composer-keyboard-count">0</span></p>
+      <p>Last key: <span id="composer-last-key"></span></p>
+      <p>Composer input: <span id="composer-input-value"></span></p>
+      <p>Sent messages: <span id="composer-send-count">0</span></p>
+      <p id="composer-result"></p>
       <p id="submit-result"></p>
       <div class="spacer"></div>
     </main>

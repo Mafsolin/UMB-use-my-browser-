@@ -73,6 +73,11 @@ describe("extractReadPage", () => {
         <div contenteditable="true">Editable note</div>
         <button hidden>Hidden</button>
         <input disabled aria-label="Disabled input" />
+        <span id="compose-label">Compose message</span><div data-testid="composer" contenteditable="true" aria-labelledby="compose-label">Draft</div>
+        <p id="search-help">Searches the documentation</p><input name="docs-search" aria-describedby="search-help" />
+        <button style="visibility: collapse">Collapsed</button>
+        <button style="opacity: 0">Transparent</button>
+        <div inert><div id="inert-editor" contenteditable="true">Inert draft</div></div>
       </body></html>`));
 
     expect(result.controls).toEqual(expect.arrayContaining([
@@ -92,7 +97,12 @@ describe("extractReadPage", () => {
       expect.objectContaining({ type: "form", selector: "#signup", actionable: true }),
       expect.objectContaining({ type: "contenteditable", label: "Editable note", actionable: true }),
       expect.objectContaining({ type: "button", label: "Hidden", visible: false, actionable: false }),
-      expect.objectContaining({ type: "input", label: "Disabled input", visible: true, actionable: false })
+      expect.objectContaining({ type: "input", label: "Disabled input", visible: true, actionable: false }),
+      expect.objectContaining({ type: "contenteditable", selector: 'div[data-testid="composer"]', label: "Compose message", actionable: true }),
+      expect.objectContaining({ type: "input", selector: 'input[name="docs-search"]', label: "Searches the documentation", actionable: true }),
+      expect.objectContaining({ type: "button", label: "Collapsed", visible: false, actionable: false }),
+      expect.objectContaining({ type: "button", label: "Transparent", visible: false, actionable: false }),
+      expect.objectContaining({ type: "contenteditable", selector: "#inert-editor", visible: true, actionable: false })
     ]));
     expect(JSON.stringify(result.controls)).not.toContain("person@example.test");
     expect(JSON.stringify(result.controls)).not.toContain("private draft");

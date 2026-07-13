@@ -68,7 +68,11 @@ export async function evaluateOnControlledTab<T>(
 ): Promise<T> {
   await ensureControlledTab(sessionId, tabId);
   const result = await runDebuggerCommand<{
-    exceptionDetails?: { text?: string };
+    exceptionDetails?: {
+      text?: string;
+      exception?: { description?: string; value?: string };
+      stackTrace?: { callFrames?: Array<{ functionName?: string; url?: string; lineNumber?: number; columnNumber?: number }> };
+    };
     result: { value?: T };
   }>(
     tabId,
@@ -83,7 +87,9 @@ export async function evaluateOnControlledTab<T>(
   );
 
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text ?? `Debugger evaluation failed on tab ${tabId}.`);
+    // Exception descriptions, values, and stack frames originate in the controlled page.
+    // Do not surface them through the bridge: they can contain page data or implementation details.
+    throw new Error(`Page evaluation failed on tab ${tabId}.`);
   }
 
   return result.result.value as T;
@@ -168,28 +174,100 @@ export async function click(
   );
 }
 
+type FillTargetKind = "input" | "textarea" | "contenteditable";
+type FillValidationCode = "selector-not-found" | "not-fillable" | "disabled" | "hidden" | "focus" | "update";
+type FillPreflightResult =
+  | { ok: true; kind: FillTargetKind }
+  | { ok: false; code: FillValidationCode };
+
+const fillValidationMessages: Record<FillValidationCode, string> = {
+  "selector-not-found": "Fill target was not found.",
+  "not-fillable": "Fill target is not fillable.",
+  disabled: "Fill target is disabled or read-only.",
+  hidden: "Fill target is hidden or has no layout.",
+  focus: "Fill target could not receive focus.",
+  update: "Fill target did not update."
+};
+
+function throwFillValidationError(code: FillValidationCode): never {
+  throw new Error(`[UMB_FILL_${code.toUpperCase().replaceAll("-", "_")}] ${fillValidationMessages[code]}`);
+}
+
 export async function fill(
   sessionId: string,
   tabId: number,
   selector: string,
   value: string
 ): Promise<true> {
-  return evaluateOnControlledTab(
+  const target = await evaluateOnControlledTab<FillPreflightResult>(
     sessionId,
     tabId,
     `(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) throw new Error("Selector not found");
-      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-        throw new Error("Target is not fillable");
+      if (!el) return { ok: false, code: "selector-not-found" };
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        if (el.disabled || el.readOnly) return { ok: false, code: "disabled" };
+        el.focus();
+        if (document.activeElement !== el) return { ok: false, code: "focus" };
+        const prototype = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (!setter) return { ok: false, code: "update" };
+        setter.call(el, ${JSON.stringify(value)});
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: ${JSON.stringify(value)} }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.value === ${JSON.stringify(value)}
+          ? { ok: true, kind: el instanceof HTMLInputElement ? "input" : "textarea" }
+          : { ok: false, code: "update" };
       }
+      if (!(el instanceof HTMLElement) || !el.isContentEditable) return { ok: false, code: "not-fillable" };
+      // CDP has no standalone focus command. Runtime.evaluate executes focus in the
+      // page's document, then Input.insertText uses Chrome's native focused target.
+      if (!el.isConnected) return { ok: false, code: "not-fillable" };
+      if (el.closest("[disabled], [aria-disabled='true'], [inert]")) {
+        return { ok: false, code: "disabled" };
+      }
+      if (el.closest("[hidden], [aria-hidden='true']")) return { ok: false, code: "hidden" };
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        style.contentVisibility === "hidden" ||
+        style.opacity === "0" ||
+        rect.width <= 0 ||
+        rect.height <= 0
+      ) return { ok: false, code: "hidden" };
       el.focus();
-      el.value = ${JSON.stringify(value)};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
+      if (document.activeElement !== el) return { ok: false, code: "focus" };
+      const selection = window.getSelection();
+      if (!selection) return { ok: false, code: "focus" };
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return { ok: true, kind: "contenteditable" };
     })()`
   );
+
+  if (!target.ok) throwFillValidationError(target.code);
+  if (target.kind !== "contenteditable") return true;
+
+  await runDebuggerCommand(tabId, "Input.insertText", { text: value }, "evaluate");
+  const update = await evaluateOnControlledTab<{ ok: true } | { ok: false; code: "update" | "not-fillable" }>(
+    sessionId,
+    tabId,
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!(el instanceof HTMLElement) || !el.isContentEditable) return { ok: false, code: "not-fillable" };
+      const text = (el.innerText ?? el.textContent ?? "").replace(/\\r\\n?/gu, "\\n");
+      return text === ${JSON.stringify(value)}
+        ? { ok: true }
+        : { ok: false, code: "update" };
+    })()`
+  );
+  if (!update.ok) throwFillValidationError(update.code);
+  return true;
 }
 
 export async function submit(
