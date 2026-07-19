@@ -16,7 +16,7 @@
     "@modelcontextprotocol/sdk": "^1.13.2",
     "@umb/core": "workspace:*",
     "@umb/protocol": "workspace:*",
-    "ws": "^8.21.0",
+    "ws": "^8.21.1",
     "zod": "^4.4.3"
   }
 }
